@@ -1,0 +1,678 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-gradient-to-br from-slate-50 via-orange-50 to-amber-50 font-body text-slate-900;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-gradient-to-r from-orange-500 to-red-500 text-white font-semibold px-6 py-3 rounded-lg 
+           shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200 
+           focus:ring-4 focus:ring-orange-300 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+  
+  .btn-secondary {
+    @apply bg-white text-slate-700 font-semibold px-6 py-3 rounded-lg border-2 border-slate-200
+           hover:border-orange-400 hover:text-orange-600 transform hover:-translate-y-0.5 
+           transition-all duration-200 focus:ring-4 focus:ring-slate-200;
+  }
+  
+  .input-field {
+    @apply w-full px-4 py-3 rounded-lg border-2 border-slate-200 focus:border-orange-400 
+           focus:ring-4 focus:ring-orange-100 outline-none transition-all duration-200
+           bg-white/80 backdrop-blur-sm;
+  }
+  
+  .card {
+    @apply bg-white/90 backdrop-blur-md rounded-2xl shadow-xl p-6 border border-slate-200/50;
+  }
+  
+  .status-badge {
+    @apply px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wide;
+  }
+  
+  .status-nouveau {
+    @apply bg-blue-100 text-blue-700 border border-blue-200;
+  }
+  
+  .status-en-cours {
+    @apply bg-amber-100 text-amber-700 border border-amber-200;
+  }
+  
+  .status-termine {
+    @apply bg-emerald-100 text-emerald-700 border border-emerald-200;
+  }
+}
+
+/* Leaflet custom styles */
+.leaflet-container {
+  @apply rounded-xl shadow-2xl;
+  font-family: 'Work Sans', sans-serif;
+  z-index: 1 !important;
+}
+
+/* Assurer que les modals sont au-dessus de la carte */
+.modal-overlay {
+  z-index: 9999 !important;
+}
+
+/* Contrôler le z-index des contrôles Leaflet */
+.leaflet-pane {
+  z-index: 400;
+}
+
+.leaflet-top,
+.leaflet-bottom {
+  z-index: 500;
+}
+
+.leaflet-popup-content-wrapper {
+  @apply rounded-xl shadow-xl border border-slate-200;
+}
+
+.leaflet-popup-content {
+  @apply m-0;
+}
+
+/* Custom marker animations */
+.marker-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: .8;
+    transform: scale(1.05);
+  }
+}
+
+/* Loading spinner */
+.spinner {
+  border: 3px solid rgba(0, 0, 0, 0.1);
+  border-left-color: #f97316;
+  border-radius: 50%;
+  width: 40px;
+  height: 40px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Smooth page transitions */
+.page-transition {
+  animation: fadeIn 0.5s ease-in;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.3s ease-out;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-track {
+  @apply bg-slate-100;
+}
+
+::-webkit-scrollbar-thumb {
+  @apply bg-orange-400 rounded-full;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  @apply bg-orange-500;
+}
+
+/* Leaflet Map Enhancements */
+.leaflet-control-zoom {
+  border: none !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+  border-radius: 12px !important;
+  overflow: hidden;
+}
+
+.leaflet-control-zoom a {
+  background: white !important;
+  color: #475569 !important;
+  font-size: 18px !important;
+  font-weight: bold !important;
+  width: 36px !important;
+  height: 36px !important;
+  line-height: 36px !important;
+  transition: all 0.2s ease !important;
+}
+
+.leaflet-control-zoom a:hover {
+  background: #f97316 !important;
+  color: white !important;
+}
+
+.leaflet-control-attribution {
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-radius: 8px 0 0 0 !important;
+  padding: 4px 8px !important;
+  font-size: 10px !important;
+}
+
+/* Custom Marker Styles */
+.custom-marker {
+  background: transparent !important;
+  border: none !important;
+}
+
+.add-marker-icon {
+  background: transparent !important;
+  border: none !important;
+}
+
+/* Marker Pulse Animation */
+@keyframes markerPulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 15px rgba(59, 130, 246, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+}
+
+.marker-pulse-animation {
+  animation: markerPulse 2s infinite;
+}
+
+/* Enhanced Popup Styles */
+.leaflet-popup-content-wrapper {
+  border-radius: 16px !important;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2) !important;
+  border: 1px solid rgba(0, 0, 0, 0.05) !important;
+  overflow: hidden;
+}
+
+.leaflet-popup-content {
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.leaflet-popup-tip-container {
+  margin-top: -1px;
+}
+
+.leaflet-popup-tip {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+}
+
+.leaflet-popup-close-button {
+  top: 8px !important;
+  right: 8px !important;
+  width: 24px !important;
+  height: 24px !important;
+  font-size: 18px !important;
+  color: #64748b !important;
+  background: #f1f5f9 !important;
+  border-radius: 50% !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  line-height: 1 !important;
+  transition: all 0.2s ease !important;
+}
+
+.leaflet-popup-close-button:hover {
+  background: #e2e8f0 !important;
+  color: #1e293b !important;
+}
+
+/* Map Container Enhancement */
+.leaflet-container {
+  border-radius: 16px !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Tooltip styles for hover info */
+.leaflet-tooltip {
+  background: white !important;
+  border: 1px solid #e2e8f0 !important;
+  border-radius: 8px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+  padding: 8px 12px !important;
+  font-size: 12px !important;
+  color: #334155 !important;
+}
+
+.leaflet-tooltip::before {
+  border-top-color: white !important;
+}
+
+/* ============================================
+   RESPONSIVE & UX IMPROVEMENTS
+   ============================================ */
+
+/* Mobile-first responsive utilities */
+@layer utilities {
+  /* Touch-friendly targets */
+  .touch-target {
+    @apply min-h-[44px] min-w-[44px];
+  }
+
+  /* Safe area padding for notched devices */
+  .safe-area-inset {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Hide scrollbar but keep functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
+  /* Smooth scroll */
+  .scroll-smooth {
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* Mobile Navigation Improvements */
+@media (max-width: 768px) {
+  /* Full-width buttons on mobile */
+  .btn-primary, .btn-secondary {
+    @apply w-full justify-center text-center;
+  }
+
+  /* Larger touch targets */
+  .input-field {
+    @apply py-4 text-base;
+  }
+
+  /* Mobile-friendly cards */
+  .card {
+    @apply rounded-xl p-4;
+  }
+
+  /* Adjust map height on mobile */
+  .map-container-mobile {
+    height: calc(100vh - 200px);
+    min-height: 350px;
+  }
+
+  /* Bottom sheet for filters on mobile */
+  .mobile-bottom-sheet {
+    @apply fixed bottom-0 left-0 right-0 bg-white rounded-t-3xl shadow-2xl z-50 
+           transform transition-transform duration-300 ease-out;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+
+  .mobile-bottom-sheet-handle {
+    @apply w-10 h-1 bg-slate-300 rounded-full mx-auto my-3;
+  }
+
+  /* Mobile popup adjustments */
+  .leaflet-popup-content-wrapper {
+    max-width: calc(100vw - 40px) !important;
+  }
+
+  /* Stack grid on mobile */
+  .mobile-stack {
+    @apply grid-cols-1 !important;
+  }
+}
+
+/* Tablet adjustments */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .tablet-two-col {
+    @apply grid-cols-2;
+  }
+}
+
+/* Loading States */
+.skeleton {
+  @apply animate-pulse bg-gradient-to-r from-slate-200 via-slate-100 to-slate-200 rounded;
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+/* Toast Notifications */
+.toast {
+  @apply fixed z-[9999] px-4 py-3 rounded-lg shadow-xl flex items-center gap-3 
+         transform transition-all duration-300 ease-out;
+  animation: toastSlideIn 0.3s ease-out;
+}
+
+.toast-success {
+  @apply bg-emerald-500 text-white;
+}
+
+.toast-error {
+  @apply bg-red-500 text-white;
+}
+
+.toast-warning {
+  @apply bg-amber-500 text-white;
+}
+
+.toast-info {
+  @apply bg-blue-500 text-white;
+}
+
+@keyframes toastSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-20px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes toastSlideOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-20px) scale(0.95);
+  }
+}
+
+.toast-exit {
+  animation: toastSlideOut 0.2s ease-in forwards;
+}
+
+/* Focus States for Accessibility */
+.focus-ring {
+  @apply focus:outline-none focus:ring-2 focus:ring-orange-500 focus:ring-offset-2;
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* High Contrast Mode */
+@media (prefers-contrast: high) {
+  .btn-primary {
+    @apply border-2 border-black;
+  }
+  
+  .card {
+    @apply border-2 border-slate-400;
+  }
+}
+
+/* Dark Mode Support (optional) */
+@media (prefers-color-scheme: dark) {
+  /* Uncomment to enable dark mode
+  body {
+    @apply bg-slate-900 text-white;
+  }
+  
+  .card {
+    @apply bg-slate-800/90 border-slate-700;
+  }
+  */
+}
+
+/* Print Styles */
+@media print {
+  .no-print {
+    display: none !important;
+  }
+  
+  body {
+    background: white !important;
+  }
+  
+  .card {
+    box-shadow: none !important;
+    border: 1px solid #ccc !important;
+  }
+}
+
+/* Overlay & Modal */
+.overlay {
+  @apply fixed inset-0 bg-black/50 backdrop-blur-sm z-40;
+  animation: overlayFadeIn 0.2s ease-out;
+}
+
+@keyframes overlayFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal {
+  @apply fixed z-50 bg-white rounded-2xl shadow-2xl;
+  animation: modalSlideUp 0.3s ease-out;
+}
+
+@keyframes modalSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(50px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Mobile Modal - Full screen on small devices */
+@media (max-width: 640px) {
+  .modal {
+    @apply inset-2 max-h-[calc(100vh-1rem)] overflow-y-auto rounded-xl;
+  }
+}
+
+/* Floating Action Button */
+.fab {
+  @apply fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full 
+         bg-gradient-to-r from-orange-500 to-red-500 text-white 
+         shadow-lg hover:shadow-xl flex items-center justify-center
+         transform hover:scale-110 active:scale-95 transition-all duration-200;
+}
+
+.fab-extended {
+  @apply w-auto px-6 gap-2;
+}
+
+/* Pull to Refresh indicator */
+.pull-indicator {
+  @apply absolute top-0 left-1/2 -translate-x-1/2 -translate-y-full
+         bg-white rounded-full p-2 shadow-lg opacity-0 transition-all;
+}
+
+.pull-indicator.active {
+  @apply opacity-100 translate-y-4;
+}
+
+/* Empty State */
+.empty-state {
+  @apply flex flex-col items-center justify-center py-12 px-6 text-center;
+}
+
+.empty-state-icon {
+  @apply w-24 h-24 text-slate-300 mb-4;
+}
+
+.empty-state-title {
+  @apply text-xl font-semibold text-slate-700 mb-2;
+}
+
+.empty-state-description {
+  @apply text-slate-500 max-w-md;
+}
+
+/* Swipe Actions (for list items) */
+.swipe-action {
+  @apply absolute top-0 bottom-0 flex items-center px-4;
+}
+
+.swipe-action-left {
+  @apply left-0 bg-emerald-500 text-white;
+}
+
+.swipe-action-right {
+  @apply right-0 bg-red-500 text-white;
+}
+
+/* Progress Bar */
+.progress-bar {
+  @apply h-2 bg-slate-200 rounded-full overflow-hidden;
+}
+
+.progress-bar-fill {
+  @apply h-full bg-gradient-to-r from-orange-500 to-red-500 rounded-full transition-all duration-500;
+}
+
+/* Badges */
+.badge {
+  @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold;
+}
+
+.badge-primary {
+  @apply bg-orange-100 text-orange-700;
+}
+
+.badge-success {
+  @apply bg-emerald-100 text-emerald-700;
+}
+
+.badge-warning {
+  @apply bg-amber-100 text-amber-700;
+}
+
+.badge-danger {
+  @apply bg-red-100 text-red-700;
+}
+
+.badge-info {
+  @apply bg-blue-100 text-blue-700;
+}
+
+/* Tooltips */
+.tooltip {
+  @apply relative inline-block;
+}
+
+.tooltip-content {
+  @apply absolute z-50 px-3 py-2 text-sm text-white bg-slate-800 rounded-lg 
+         opacity-0 invisible transition-all duration-200 whitespace-nowrap;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.tooltip:hover .tooltip-content {
+  @apply opacity-100 visible;
+}
+
+.tooltip-content::after {
+  content: '';
+  @apply absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent;
+  border-top-color: #1e293b;
+}
+
+/* Bottom Navigation (Mobile) */
+.bottom-nav {
+  @apply fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 
+         flex justify-around items-center h-16 z-50 md:hidden safe-area-inset;
+}
+
+.bottom-nav-item {
+  @apply flex flex-col items-center justify-center flex-1 h-full 
+         text-slate-500 transition-colors touch-target;
+}
+
+.bottom-nav-item.active {
+  @apply text-orange-500;
+}
+
+.bottom-nav-item-icon {
+  @apply w-6 h-6;
+}
+
+.bottom-nav-item-label {
+  @apply text-xs mt-1;
+}
+
+/* Gesture hints */
+.gesture-hint {
+  @apply absolute bottom-4 left-1/2 -translate-x-1/2 
+         flex items-center gap-2 text-sm text-slate-500 
+         bg-white/80 backdrop-blur px-4 py-2 rounded-full shadow-lg;
+  animation: bounce 2s infinite;
+}
+
+@keyframes bounce {
+  0%, 100% {
+    transform: translateX(-50%) translateY(0);
+  }
+  50% {
+    transform: translateX(-50%) translateY(-5px);
+  }
+}

@@ -1,0 +1,50 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Fonction utilitaire pour vérifier si l'utilisateur est manager
+    function isManager() {
+      return request.auth != null && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'manager';
+    }
+    
+    // Collection users
+    match /users/{userId} {
+      // Lecture: tout utilisateur connecté peut lire
+      allow read: if request.auth != null;
+      
+      // Création: utilisateur connecté (pour inscription) ou manager
+      allow create: if request.auth != null;
+      
+      // Mise à jour: propriétaire ou manager
+      allow update: if request.auth != null && 
+                       (request.auth.uid == userId || isManager());
+      
+      // Suppression: uniquement les managers
+      allow delete: if isManager();
+    }
+    
+    // Collection road_reports
+    match /road_reports/{reportId} {
+      // Lecture: tout le monde
+      allow read: if true;
+      
+      // Création: utilisateurs connectés
+      allow create: if request.auth != null;
+      
+      // Mise à jour: manager ou propriétaire du signalement
+      allow update: if request.auth != null && 
+                       (isManager() || resource.data.userId == request.auth.uid);
+      
+      // Suppression: manager ou propriétaire
+      allow delete: if request.auth != null && 
+                       (isManager() || resource.data.userId == request.auth.uid);
+    }
+    
+    // Collection entreprises
+    match /entreprises/{entrepriseId} {
+      allow read: if true;
+      allow write: if isManager();
+    }
+  }
+}
