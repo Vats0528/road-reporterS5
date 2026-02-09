@@ -1,0 +1,5 @@
+Email		Mot de passe 
+manager@routestana.mg	manager123 
+user@test.mg	user123
+v@gmail.com		vats123
+manager@test.mg	    manager123	

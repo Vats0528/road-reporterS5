@@ -1,5 +1,11 @@
 import React, { createContext, useState, useEffect, useContext, useMemo, useCallback } from 'react';
-import { observeAuthState, loginUser, logoutUser, registerUser, getUserData } from '../services/authService';
+import { 
+  observeAuthStateLocal, 
+  loginUserLocal, 
+  logoutUserLocal, 
+  registerUserLocal, 
+  getUserDataLocal 
+} from '../services/localAuthService';
 import { ROLE_PERMISSIONS, USER_ROLES } from '../utils/constants';
 
 const AuthContext = createContext();
@@ -16,11 +22,14 @@ export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [userData, setUserData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [isOffline, setIsOffline] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = observeAuthState(({ user, userData }) => {
+    // Utiliser l'authentification locale
+    const unsubscribe = observeAuthStateLocal(({ user, userData, offline }) => {
       setCurrentUser(user);
       setUserData(userData);
+      setIsOffline(offline || false);
       setLoading(false);
     });
 
@@ -28,7 +37,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   const login = async (email, password) => {
-    const result = await loginUser(email, password);
+    const result = await loginUserLocal(email, password);
     if (result.user) {
       setCurrentUser(result.user);
       setUserData(result.userData);
@@ -37,11 +46,10 @@ export const AuthProvider = ({ children }) => {
   };
 
   const register = async (email, password, displayName, role = 'user') => {
-    const result = await registerUser(email, password, displayName, role);
+    const result = await registerUserLocal(email, password, displayName, role);
     if (result.user) {
       setCurrentUser(result.user);
-      // Mettre à jour userData avec le nouveau rôle
-      setUserData({
+      setUserData(result.userData || {
         uid: result.user.uid,
         email: result.user.email,
         displayName: displayName,
@@ -52,7 +60,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    const result = await logoutUser();
+    const result = await logoutUserLocal();
     if (!result.error) {
       setCurrentUser(null);
       setUserData(null);
@@ -60,13 +68,13 @@ export const AuthProvider = ({ children }) => {
     return result;
   };
 
-  // Rafraîchir les données utilisateur depuis Firestore
+  // Rafraîchir les données utilisateur depuis PostgreSQL
   const refreshUserData = useCallback(async () => {
     if (!currentUser) return;
     try {
-      const freshData = await getUserData(currentUser.uid);
-      if (freshData) {
-        setUserData(freshData);
+      const { data } = await getUserDataLocal(currentUser.uid);
+      if (data) {
+        setUserData(data);
       }
     } catch (error) {
       console.error('Erreur lors du rafraîchissement des données utilisateur:', error);
@@ -130,6 +138,7 @@ export const AuthProvider = ({ children }) => {
     currentUser,
     userData,
     loading,
+    isOffline,
     
     // Actions
     login,

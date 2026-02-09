@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MapPin, FileText, X, Loader, Camera, AlertCircle, Navigation } from 'lucide-react';
-import { createReport } from '../services/reportService';
-import { uploadMultipleImages } from '../services/imageService';
+import { createReport, updateReport } from '../services/localDbService';
+import { uploadMultipleImagesLocal } from '../services/localImageService';
 import { useAuth } from '../context/AuthContext';
 import ImageUpload, { UploadProgress } from './ImageUpload';
 import { LocationDisplay } from './QuartierSelector';
@@ -81,26 +81,25 @@ const ReportForm = ({ selectedPosition, onClose, onReportCreated }) => {
       if (imageFiles.length > 0) {
         setUploadingImages(true);
         
-        const uploadResult = await uploadMultipleImages(
+        const uploadResult = await uploadMultipleImagesLocal(
           imageFiles,
           reportId,
           (progress) => setUploadProgress(progress)
         );
 
-        if (uploadResult.errors.length > 0) {
+        if (uploadResult.errors && uploadResult.errors.length > 0) {
           console.warn('Erreurs upload:', uploadResult.errors);
         }
 
-        // Mettre à jour le signalement avec les URLs des images
-        if (uploadResult.images.length > 0) {
-          const { updateReport } = await import('../services/reportService');
+        // Mettre à jour le signalement avec les URLs des images (local)
+        if (uploadResult.urls && uploadResult.urls.length > 0) {
           await updateReport(reportId, {
-            images: uploadResult.images.map(img => ({
-              url: img.url,
-              path: img.path,
-              fileName: img.fileName
+            images: uploadResult.urls.map(url => ({
+              url: url,
+              path: url,
+              fileName: url.split('/').pop()
             }))
-          }, 'user');
+          });
         }
 
         setUploadingImages(false);

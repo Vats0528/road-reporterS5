@@ -16,6 +16,24 @@ import {
 } from 'lucide-react';
 import { QUARTIERS, ARRONDISSEMENTS } from '../data/quartiers';
 
+// Liste des entreprises avec leurs IDs
+const ENTREPRISES = {
+  'ent1': 'Colas Madagascar',
+  'ent2': 'Sogea Satom',
+  'ent3': 'Razel-Bec',
+  'ent4': 'Enterprise Locale BTP',
+  'ent5': 'Madagascar Routes SA',
+};
+
+// Fonction pour obtenir le nom d'une entreprise à partir de son ID
+const getEntrepriseName = (idOrName) => {
+  if (!idOrName) return null;
+  // Si c'est déjà un nom (pas dans la liste des IDs), le retourner
+  if (!ENTREPRISES[idOrName]) return idOrName;
+  // Sinon retourner le nom correspondant à l'ID
+  return ENTREPRISES[idOrName];
+};
+
 /**
  * Dashboard de statistiques avancées pour le Manager
  */
@@ -27,12 +45,18 @@ export default function AdvancedStats({ reports = [] }) {
     // Statistiques de base
     const total = reports.length;
     const nouveau = reports.filter(r => r.status === 'nouveau').length;
-    const enCours = reports.filter(r => r.status === 'en-cours').length;
+    const enCours = reports.filter(r => r.status === 'en-cours' || r.status === 'en_cours').length;
     const termine = reports.filter(r => r.status === 'termine').length;
 
-    // Budget et surface
-    const totalBudget = reports.reduce((sum, r) => sum + (r.budget || 0), 0);
-    const totalSurface = reports.reduce((sum, r) => sum + (r.surface || 0), 0);
+    // Budget et surface (conversion explicite en nombres)
+    const totalBudget = reports.reduce((sum, r) => {
+      const val = Number(r.budget) || 0;
+      return sum + val;
+    }, 0);
+    const totalSurface = reports.reduce((sum, r) => {
+      const val = Number(r.surface) || 0;
+      return sum + val;
+    }, 0);
     const avgBudget = total > 0 ? totalBudget / total : 0;
     const avgSurface = total > 0 ? totalSurface / total : 0;
 
@@ -42,11 +66,25 @@ export default function AdvancedStats({ reports = [] }) {
       byType[r.type] = (byType[r.type] || 0) + 1;
     });
 
-    // Par arrondissement
+    // Par arrondissement - avec stats détaillées
     const byArrondissement = {};
     reports.forEach(r => {
-      if (r.arrondissement) {
-        byArrondissement[r.arrondissement] = (byArrondissement[r.arrondissement] || 0) + 1;
+      // Extraire l'arrondissement du quartier si pas défini
+      let arr = r.arrondissement;
+      if (!arr && r.quartier) {
+        const quartier = QUARTIERS.find(q => q.id === r.quartier);
+        arr = quartier?.arrondissement;
+      }
+      if (arr) {
+        if (!byArrondissement[arr]) {
+          byArrondissement[arr] = { total: 0, nouveau: 0, enCours: 0, termine: 0, budget: 0, surface: 0 };
+        }
+        byArrondissement[arr].total++;
+        byArrondissement[arr].budget += Number(r.budget) || 0;
+        byArrondissement[arr].surface += Number(r.surface) || 0;
+        if (r.status === 'nouveau') byArrondissement[arr].nouveau++;
+        else if (r.status === 'en-cours' || r.status === 'en_cours') byArrondissement[arr].enCours++;
+        else if (r.status === 'termine') byArrondissement[arr].termine++;
       }
     });
 
@@ -58,39 +96,48 @@ export default function AdvancedStats({ reports = [] }) {
       }
     });
 
-    // Tendances par mois (6 derniers mois)
+    // Tendances par mois (6 derniers mois) avec stats détaillées
     const monthlyTrend = {};
     const now = new Date();
     for (let i = 5; i >= 0; i--) {
       const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      monthlyTrend[key] = { total: 0, termine: 0 };
+      monthlyTrend[key] = { total: 0, nouveau: 0, enCours: 0, termine: 0, budget: 0 };
     }
 
     reports.forEach(r => {
-      if (r.createdAt) {
-        const date = r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt);
-        const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-        if (monthlyTrend[key]) {
-          monthlyTrend[key].total++;
-          if (r.status === 'termine') {
-            monthlyTrend[key].termine++;
+      // Support snake_case et camelCase
+      const createdAt = r.created_at || r.createdAt;
+      if (createdAt) {
+        const date = createdAt instanceof Date ? createdAt : new Date(createdAt);
+        if (!isNaN(date.getTime())) {
+          const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+          if (monthlyTrend[key]) {
+            monthlyTrend[key].total++;
+            monthlyTrend[key].budget += Number(r.budget) || 0;
+            if (r.status === 'nouveau') monthlyTrend[key].nouveau++;
+            else if (r.status === 'en-cours' || r.status === 'en_cours') monthlyTrend[key].enCours++;
+            else if (r.status === 'termine') monthlyTrend[key].termine++;
           }
         }
       }
     });
 
-    // Entreprises les plus actives
+    // Entreprises les plus actives - convertir les IDs en noms
     const byEntreprise = {};
     reports.forEach(r => {
-      if (r.entreprise) {
-        if (!byEntreprise[r.entreprise]) {
-          byEntreprise[r.entreprise] = { total: 0, termine: 0, budget: 0 };
-        }
-        byEntreprise[r.entreprise].total++;
-        byEntreprise[r.entreprise].budget += r.budget || 0;
-        if (r.status === 'termine') {
-          byEntreprise[r.entreprise].termine++;
+      const entrepriseId = r.entreprise_id || r.entreprise;
+      if (entrepriseId) {
+        const entrepriseName = getEntrepriseName(entrepriseId);
+        if (entrepriseName) {
+          if (!byEntreprise[entrepriseName]) {
+            byEntreprise[entrepriseName] = { total: 0, termine: 0, budget: 0 };
+          }
+          byEntreprise[entrepriseName].total++;
+          byEntreprise[entrepriseName].budget += Number(r.budget) || 0;
+          if (r.status === 'termine') {
+            byEntreprise[entrepriseName].termine++;
+          }
         }
       }
     });
@@ -98,16 +145,56 @@ export default function AdvancedStats({ reports = [] }) {
     // Taux de résolution
     const resolutionRate = total > 0 ? Math.round((termine / total) * 100) : 0;
 
-    // Délai moyen de résolution (jours)
-    const resolvedReports = reports.filter(r => r.status === 'termine' && r.createdAt && r.updatedAt);
+    // Délai moyen de résolution (jours) - calculé dynamiquement
+    // Utiliser completed_at si disponible, sinon updated_at
+    const resolvedReports = reports.filter(r => r.status === 'termine');
     let avgResolutionDays = 0;
     if (resolvedReports.length > 0) {
-      const totalDays = resolvedReports.reduce((sum, r) => {
-        const created = r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt);
-        const updated = r.updatedAt instanceof Date ? r.updatedAt : new Date(r.updatedAt);
-        return sum + Math.max(0, (updated - created) / (1000 * 60 * 60 * 24));
-      }, 0);
-      avgResolutionDays = Math.round(totalDays / resolvedReports.length);
+      let totalDays = 0;
+      let validCount = 0;
+      resolvedReports.forEach(r => {
+        // Support snake_case et camelCase
+        const createdAt = r.created_at || r.createdAt;
+        const completedAt = r.completed_at || r.completedAt || r.updated_at || r.updatedAt;
+        
+        if (createdAt && completedAt) {
+          const created = createdAt instanceof Date ? createdAt : new Date(createdAt);
+          const completed = completedAt instanceof Date ? completedAt : new Date(completedAt);
+          
+          if (!isNaN(created.getTime()) && !isNaN(completed.getTime())) {
+            const days = Math.max(0, (completed - created) / (1000 * 60 * 60 * 24));
+            // Ignorer les délais anormalement longs (> 365 jours) qui sont des erreurs de données
+            if (days <= 365) {
+              totalDays += days;
+              validCount++;
+            }
+          }
+        }
+      });
+      avgResolutionDays = validCount > 0 ? Math.round(totalDays / validCount) : 0;
+    }
+
+    // Délai moyen pour les signalements en cours (depuis combien de temps ils attendent)
+    const inProgressReports = reports.filter(r => r.status === 'en-cours' || r.status === 'en_cours');
+    let avgInProgressDays = 0;
+    if (inProgressReports.length > 0) {
+      let totalDays = 0;
+      let validCount = 0;
+      const today = new Date();
+      inProgressReports.forEach(r => {
+        const createdAt = r.created_at || r.createdAt;
+        if (createdAt) {
+          const created = createdAt instanceof Date ? createdAt : new Date(createdAt);
+          if (!isNaN(created.getTime())) {
+            const days = Math.max(0, (today - created) / (1000 * 60 * 60 * 24));
+            if (days <= 365) {
+              totalDays += days;
+              validCount++;
+            }
+          }
+        }
+      });
+      avgInProgressDays = validCount > 0 ? Math.round(totalDays / validCount) : 0;
     }
 
     return {
@@ -125,7 +212,8 @@ export default function AdvancedStats({ reports = [] }) {
       monthlyTrend,
       byEntreprise,
       resolutionRate,
-      avgResolutionDays
+      avgResolutionDays,
+      avgInProgressDays
     };
   }, [reports]);
 
@@ -177,14 +265,14 @@ export default function AdvancedStats({ reports = [] }) {
           </div>
         </div>
 
-        {/* Délai moyen */}
+        {/* Délai moyen - amélioré */}
         <div className="card bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-blue-100 text-xs font-medium uppercase">Délai moyen</p>
+              <p className="text-blue-100 text-xs font-medium uppercase">Délai moyen résolution</p>
               <p className="text-3xl font-bold mt-1">{stats.avgResolutionDays}j</p>
               <p className="text-blue-200 text-xs mt-1">
-                pour résoudre
+                En cours: ~{stats.avgInProgressDays}j
               </p>
             </div>
             <div className="p-3 bg-white/20 rounded-full">
@@ -262,38 +350,44 @@ export default function AdvancedStats({ reports = [] }) {
           </div>
         </div>
 
-        {/* Répartition par arrondissement */}
+        {/* Répartition par arrondissement - amélioré */}
         <div className="card">
           <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
             <Building2 className="h-5 w-5 text-indigo-500" />
-            Par arrondissement
+            Répartition par arrondissement
           </h3>
           {Object.keys(stats.byArrondissement).length > 0 ? (
-            <div className="space-y-3">
+            <div className="space-y-4">
               {Object.entries(stats.byArrondissement)
-                .sort((a, b) => b[1] - a[1])
-                .slice(0, 6)
-                .map(([arr, count]) => {
-                  const arrInfo = ARRONDISSEMENTS[arr];
-                  const percentage = Math.round((count / stats.total) * 100);
+                .sort((a, b) => b[1].total - a[1].total)
+                .map(([arr, data]) => {
+                  const arrInfo = ARRONDISSEMENTS.find(a => a.id === Number(arr)) || ARRONDISSEMENTS[Number(arr) - 1];
+                  const percentage = Math.round((data.total / stats.total) * 100);
+                  const tauxResolution = data.total > 0 ? Math.round((data.termine / data.total) * 100) : 0;
                   return (
-                    <div key={arr}>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-medium text-slate-700">
-                          {arrInfo?.name || arr}
+                    <div key={arr} className="p-3 bg-slate-50 rounded-lg">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-semibold text-slate-700">
+                          {arrInfo?.name || `Arrondissement ${arr}`}
                         </span>
-                        <span className="text-sm text-slate-500">
-                          {count} ({percentage}%)
+                        <span className="text-sm font-bold" style={{ color: arrInfo?.color || '#6366f1' }}>
+                          {data.total} signalements
                         </span>
                       </div>
-                      <div className="w-full bg-slate-200 rounded-full h-2">
+                      <div className="w-full bg-slate-200 rounded-full h-2 mb-2">
                         <div
-                          className="h-full rounded-full"
+                          className="h-full rounded-full transition-all"
                           style={{ 
                             width: `${percentage}%`,
                             backgroundColor: arrInfo?.color || '#6366f1'
                           }}
                         />
+                      </div>
+                      <div className="flex justify-between text-xs text-slate-500">
+                        <span>🔴 {data.nouveau} new</span>
+                        <span>🟡 {data.enCours} en cours</span>
+                        <span>🟢 {data.termine} terminés</span>
+                        <span className="font-medium">Taux: {tauxResolution}%</span>
                       </div>
                     </div>
                   );
@@ -308,49 +402,107 @@ export default function AdvancedStats({ reports = [] }) {
         </div>
       </div>
 
-      {/* Tendances mensuelles */}
+      {/* Tendances mensuelles - amélioré */}
       <div className="card">
         <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
           <BarChart3 className="h-5 w-5 text-emerald-500" />
           Tendances des 6 derniers mois
         </h3>
-        <div className="flex items-end justify-between gap-2 h-40">
+        <div className="flex items-end justify-between gap-3 h-48">
           {Object.entries(stats.monthlyTrend).map(([month, data]) => {
             const maxVal = Math.max(...Object.values(stats.monthlyTrend).map(d => d.total), 1);
             const heightPercent = (data.total / maxVal) * 100;
-            const terminePct = data.total > 0 ? (data.termine / data.total) * 100 : 0;
             const monthName = new Date(month + '-01').toLocaleDateString('fr-FR', { month: 'short' });
+            const yearNum = month.split('-')[0];
             
             return (
               <div key={month} className="flex-1 flex flex-col items-center">
-                <div className="w-full flex flex-col items-center justify-end h-32">
-                  <span className="text-xs font-medium text-slate-600 mb-1">{data.total}</span>
+                <div className="w-full flex flex-col items-center justify-end h-36">
+                  <span className="text-xs font-bold text-slate-700 mb-1">{data.total}</span>
                   <div 
-                    className="w-full max-w-12 bg-slate-200 rounded-t relative overflow-hidden"
-                    style={{ height: `${Math.max(heightPercent, 5)}%` }}
+                    className="w-full max-w-14 rounded-t overflow-hidden flex flex-col-reverse"
+                    style={{ height: `${Math.max(heightPercent, 8)}%`, minHeight: '20px' }}
                   >
-                    <div 
-                      className="absolute bottom-0 left-0 right-0 bg-emerald-500"
-                      style={{ height: `${terminePct}%` }}
-                    />
-                    <div 
-                      className="absolute top-0 left-0 right-0 bg-orange-400"
-                      style={{ height: `${100 - terminePct}%` }}
-                    />
+                    {/* Terminés - vert */}
+                    {data.termine > 0 && (
+                      <div 
+                        className="bg-emerald-500 w-full transition-all"
+                        style={{ height: `${(data.termine / Math.max(data.total, 1)) * 100}%` }}
+                        title={`${data.termine} terminés`}
+                      />
+                    )}
+                    {/* En cours - orange */}
+                    {data.enCours > 0 && (
+                      <div 
+                        className="bg-amber-500 w-full transition-all"
+                        style={{ height: `${(data.enCours / Math.max(data.total, 1)) * 100}%` }}
+                        title={`${data.enCours} en cours`}
+                      />
+                    )}
+                    {/* Nouveaux - rouge */}
+                    {data.nouveau > 0 && (
+                      <div 
+                        className="bg-red-500 w-full transition-all"
+                        style={{ height: `${(data.nouveau / Math.max(data.total, 1)) * 100}%` }}
+                        title={`${data.nouveau} nouveaux`}
+                      />
+                    )}
+                    {/* Si aucune donnée */}
+                    {data.total === 0 && (
+                      <div className="bg-slate-200 w-full h-full" />
+                    )}
                   </div>
                 </div>
-                <span className="text-xs text-slate-500 mt-2 capitalize">{monthName}</span>
+                <div className="text-center mt-2">
+                  <span className="text-xs font-medium text-slate-600 capitalize">{monthName}</span>
+                  <span className="text-xs text-slate-400 block">{yearNum}</span>
+                </div>
               </div>
             );
           })}
         </div>
-        <div className="flex items-center justify-center gap-6 mt-4 text-xs">
+        <div className="flex items-center justify-center gap-4 mt-4 text-xs flex-wrap">
           <span className="flex items-center gap-1">
-            <span className="w-3 h-3 bg-orange-400 rounded" /> Non terminés
+            <span className="w-3 h-3 bg-red-500 rounded" /> Nouveaux
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-3 h-3 bg-amber-500 rounded" /> En cours
           </span>
           <span className="flex items-center gap-1">
             <span className="w-3 h-3 bg-emerald-500 rounded" /> Terminés
           </span>
+        </div>
+        {/* Résumé mensuel */}
+        <div className="mt-4 pt-4 border-t border-slate-200">
+          <div className="grid grid-cols-3 gap-4 text-center">
+            <div>
+              <p className="text-xs text-slate-500">Moyenne/mois</p>
+              <p className="text-lg font-bold text-slate-700">
+                {Math.round(Object.values(stats.monthlyTrend).reduce((s, d) => s + d.total, 0) / 6)}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Mois le plus actif</p>
+              <p className="text-lg font-bold text-orange-600">
+                {(() => {
+                  const entries = Object.entries(stats.monthlyTrend);
+                  const max = entries.reduce((a, b) => b[1].total > a[1].total ? b : a);
+                  return new Date(max[0] + '-01').toLocaleDateString('fr-FR', { month: 'short' });
+                })()}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-slate-500">Taux résolution moyen</p>
+              <p className="text-lg font-bold text-emerald-600">
+                {(() => {
+                  const data = Object.values(stats.monthlyTrend);
+                  const totalAll = data.reduce((s, d) => s + d.total, 0);
+                  const termineTot = data.reduce((s, d) => s + d.termine, 0);
+                  return totalAll > 0 ? Math.round((termineTot / totalAll) * 100) : 0;
+                })()}%
+              </p>
+            </div>
+          </div>
         </div>
       </div>
 

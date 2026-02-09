@@ -4,7 +4,7 @@ import {
   Shield, User, Mail, Calendar, AlertTriangle, CheckCircle, X,
   Eye, EyeOff
 } from 'lucide-react';
-import { getAllUsers, createUserByManager, deleteUser, unblockUser } from '../services/authService';
+import { getAllUsersLocal, createUserByManagerLocal, deleteUserLocal, unblockUserLocal } from '../services/localAuthService';
 
 const UserManager = () => {
   const [users, setUsers] = useState([]);
@@ -30,7 +30,7 @@ const UserManager = () => {
 
   const loadUsers = async () => {
     setLoading(true);
-    const result = await getAllUsers();
+    const result = await getAllUsersLocal();
     if (!result.error) {
       setUsers(result.users);
     } else {
@@ -48,7 +48,7 @@ const UserManager = () => {
     e.preventDefault();
     setCreating(true);
 
-    const result = await createUserByManager(
+    const result = await createUserByManagerLocal(
       newUser.email,
       newUser.password,
       newUser.displayName,
@@ -67,7 +67,7 @@ const UserManager = () => {
   };
 
   const handleUnblock = async (email) => {
-    const result = unblockUser(email);
+    const result = unblockUserLocal(email);
     if (result.success) {
       showNotification(`${email} débloqué avec succès`);
       loadUsers();
@@ -75,7 +75,7 @@ const UserManager = () => {
   };
 
   const handleDeleteUser = async (userId, email) => {
-    const result = await deleteUser(userId);
+    const result = await deleteUserLocal(userId);
     if (result.error) {
       showNotification(result.error, 'error');
     } else {
