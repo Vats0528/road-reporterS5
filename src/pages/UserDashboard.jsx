@@ -4,7 +4,7 @@ import RoadMap from '../components/RoadMap';
 import SummaryTable from '../components/SummaryTable';
 import ReportForm from '../components/ReportForm';
 import SearchFilters from '../components/SearchFilters';
-import { getUserReports, getAllReports, getReportsStats } from '../services/reportService';
+import { getUserReports, getAllReports, getReportsStats } from '../services/localDbService';
 import { PlusCircle, Filter, RefreshCw, User, Globe, List } from 'lucide-react';
 
 const UserDashboard = () => {
@@ -36,8 +36,8 @@ const UserDashboard = () => {
     
     let result;
     if (showMyReports && currentUser?.uid) {
-      console.log('Chargement des signalements pour userId:', currentUser.uid);
-      result = await getUserReports(currentUser.uid);
+      console.log('Chargement des signalements pour userId:', currentUser.uid, 'email:', currentUser.email);
+      result = await getUserReports(currentUser.uid, currentUser.email);
       console.log('Résultat getUserReports:', result);
     } else {
       result = await getAllReports();

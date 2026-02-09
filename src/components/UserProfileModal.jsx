@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { updateUserProfile, changePassword } from '../services/authService';
+import { updateUserProfileLocal, changePasswordLocal } from '../services/localAuthService';
 import { 
   X, User, Mail, Lock, Save, AlertCircle, CheckCircle, 
   Eye, EyeOff, Calendar, Shield
@@ -77,7 +77,7 @@ export default function UserProfileModal({ isOpen, onClose }) {
     setLoading(true);
 
     try {
-      const result = await updateUserProfile(currentUser.uid, profileData);
+      const result = await updateUserProfileLocal(currentUser.uid, profileData);
       
       if (result.error) {
         setError(result.error);
@@ -113,7 +113,7 @@ export default function UserProfileModal({ isOpen, onClose }) {
     setLoading(true);
 
     try {
-      const result = await changePassword(passwordData.currentPassword, passwordData.newPassword);
+      const result = await changePasswordLocal(passwordData.currentPassword, passwordData.newPassword);
       
       if (result.error) {
         setError(result.error);

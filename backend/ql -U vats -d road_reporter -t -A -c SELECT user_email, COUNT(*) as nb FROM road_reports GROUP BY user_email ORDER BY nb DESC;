@@ -1,0 +1,7 @@
+      user_email       | nb_signalements |                                                                ids                                                                 
+-----------------------+-----------------+------------------------------------------------------------------------------------------------------------------------------------
+ user@test.mg          |              11 | test-oct-1, test-dec-1, test-nov-1, test-dec-2, test-dec-3, test-nov-2, test-jan-1, test-oct-2, test-jan-2, test-sep-2, test-sep-1
+ manager@routestana.mg |               5 | 740bae37-1e40-48ec-b347-093879d25cf0, 5, 4, 12, 729f7e57-3a40-478d-a730-917890e287f9
+ v@gmail.com           |               1 | sCXUSzLAfKmPpAWfqiwl
+(3 rows)
+
