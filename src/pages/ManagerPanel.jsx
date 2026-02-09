@@ -10,14 +10,23 @@ import EntrepriseManager from '../components/EntrepriseManager';
 import UserManager from '../components/UserManager';
 import SyncButton from '../components/SyncButton';
 import ReportHistory, { useLocalHistory, HISTORY_ACTIONS } from '../components/ReportHistory';
-import { getAllReports, updateReport, updateReportStatus, deleteReport, getReportsStats } from '../services/reportService';
+import { getAllReports, updateReport, updateReportStatus, deleteReport, getReportsStats } from '../services/localDbService';
 import { downloadCSV, printReport, downloadJSON } from '../services/exportService';
 import { validateReports, ValidationSummary } from '../services/validationService.jsx';
 import { QUARTIERS, ARRONDISSEMENTS } from '../data/quartiers';
 import { 
   RefreshCw, Edit, Save, X, Download, Trash2, AlertTriangle, Shield, Image, MapPin,
-  FileText, BarChart3, Building2, History, CheckCircle, FileJson, Printer, Clock, Users
+  FileText, BarChart3, Building2, History, CheckCircle, FileJson, Printer, Users
 } from 'lucide-react';
+
+// Liste des entreprises (à terme, à récupérer depuis la base)
+const ENTREPRISES = [
+  { id: 'ent1', name: 'Colas Madagascar' },
+  { id: 'ent2', name: 'Sogea Satom' },
+  { id: 'ent3', name: 'Razel-Bec' },
+  { id: 'ent4', name: 'Enterprise Locale BTP' },
+  { id: 'ent5', name: 'Madagascar Routes SA' },
+];
 
 const ManagerPanel = () => {
   const { userData } = useAuth();
@@ -109,9 +118,10 @@ const ManagerPanel = () => {
     
     setEditingReport({
       id: report.id,
+      type: report.type,
       surface: report.surface || '',
       budget: report.budget || '',
-      entreprise: report.entreprise || '',
+      entreprise: report.entreprise_id || report.entreprise || '',
       status: report.status
     });
   };
@@ -125,6 +135,8 @@ const ManagerPanel = () => {
       entreprise: editingReport.entreprise || null,
       status: editingReport.status
     };
+
+    console.log('Mise à jour du signalement:', editingReport.id, updateData);
 
     // Passer le rôle pour la vérification des permissions
     const result = await updateReport(editingReport.id, updateData, userData?.role);
@@ -419,18 +431,21 @@ const ManagerPanel = () => {
 
                           <div>
                             <label className="block text-xs font-semibold text-slate-600 mb-1">
-                              Entreprise
+                              Entreprise assignée
                             </label>
-                            <input
-                              type="text"
+                            <select
                               value={editingReport.entreprise}
                               onChange={(e) => setEditingReport({
                                 ...editingReport,
                                 entreprise: e.target.value
                               })}
                               className="input-field text-sm"
-                              placeholder="Nom de l'entreprise"
-                            />
+                            >
+                              <option value="">-- Sélectionner une entreprise --</option>
+                              {ENTREPRISES.map(ent => (
+                                <option key={ent.id} value={ent.id}>{ent.name}</option>
+                              ))}
+                            </select>
                           </div>
 
                           <div>
@@ -464,12 +479,22 @@ const ManagerPanel = () => {
                               {report.status}
                             </span>
                           </div>
-                          <button
-                            onClick={() => handleEditReport(report)}
-                            className="p-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
-                          >
-                            <Edit className="h-4 w-4" />
-                          </button>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleEditReport(report)}
+                              className="p-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition-colors"
+                              title="Modifier"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button
+                              onClick={() => setDeleteConfirm(report.id)}
+                              className="p-2 bg-red-100 text-red-600 rounded-lg hover:bg-red-200 transition-colors"
+                              title="Supprimer"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
@@ -488,13 +513,13 @@ const ManagerPanel = () => {
                           <div>
                             <span className="text-slate-600">Budget:</span>
                             <span className="ml-2 font-medium text-emerald-600">
-                              {report.budget ? `${report.budget.toLocaleString()} MGA` : 'N/A'}
+                              {report.budget ? `${Number(report.budget).toLocaleString()} MGA` : 'N/A'}
                             </span>
                           </div>
                           <div>
                             <span className="text-slate-600">Entreprise:</span>
                             <span className="ml-2 font-medium text-slate-800">
-                              {report.entreprise || 'N/A'}
+                              {ENTREPRISES.find(e => e.id === report.entreprise_id)?.name || report.entreprise || 'Non assignée'}
                             </span>
                           </div>
                         </div>

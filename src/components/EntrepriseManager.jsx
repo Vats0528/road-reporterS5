@@ -16,17 +16,21 @@ import {
   ChevronDown,
   ChevronUp,
   Calendar,
-  Eye
+  Eye,
+  DollarSign,
+  Ruler,
+  Clock,
+  AlertCircle
 } from 'lucide-react';
 import { REPORT_TYPE_LABELS } from '../utils/constants';
 
-// Liste des entreprises prédéfinies (peut être étendue avec Firebase)
+// Liste des entreprises prédéfinies avec plus de détails
 const DEFAULT_ENTREPRISES = [
-  { id: '1', name: 'Colas Madagascar', contact: '+261 20 22 123 45', email: 'contact@colas.mg', specialite: 'Travaux routiers', rating: 4.5 },
-  { id: '2', name: 'SOGEA-SATOM', contact: '+261 20 22 234 56', email: 'info@sogea-satom.mg', specialite: 'Infrastructure', rating: 4.2 },
-  { id: '3', name: 'ENTREPRISE GENERALE', contact: '+261 20 22 345 67', email: 'eg@orange.mg', specialite: 'BTP', rating: 3.8 },
-  { id: '4', name: 'MICTSL', contact: '+261 20 22 456 78', email: 'contact@mictsl.mg', specialite: 'Transport & Logistique', rating: 4.0 },
-  { id: '5', name: 'Henri Fraise', contact: '+261 20 22 567 89', email: 'hf@henrifraise.mg', specialite: 'Travaux publics', rating: 4.3 },
+  { id: 'ent1', name: 'Colas Madagascar', contact: '+261 20 22 123 45', email: 'contact@colas.mg', specialite: 'Travaux routiers', rating: 4.5 },
+  { id: 'ent2', name: 'Sogea Satom', contact: '+261 20 22 234 56', email: 'info@sogea-satom.mg', specialite: 'Infrastructure', rating: 4.2 },
+  { id: 'ent3', name: 'Razel-Bec', contact: '+261 20 22 345 67', email: 'razel@orange.mg', specialite: 'BTP & Génie civil', rating: 4.0 },
+  { id: 'ent4', name: 'Enterprise Locale BTP', contact: '+261 20 22 456 78', email: 'contact@localbtp.mg', specialite: 'BTP Local', rating: 3.8 },
+  { id: 'ent5', name: 'Madagascar Routes SA', contact: '+261 20 22 567 89', email: 'info@mdgroutes.mg', specialite: 'Travaux publics', rating: 4.3 },
 ];
 
 /**
@@ -38,6 +42,7 @@ export default function EntrepriseManager({ reports = [], onAssignEntreprise }) 
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [expandedEntreprise, setExpandedEntreprise] = useState(null);
+  const [sortBy, setSortBy] = useState('budget'); // 'budget', 'total', 'rate'
   const [newEntreprise, setNewEntreprise] = useState({
     name: '',
     contact: '',
@@ -45,35 +50,49 @@ export default function EntrepriseManager({ reports = [], onAssignEntreprise }) 
     specialite: ''
   });
 
-  // Statistiques par entreprise
+  // Statistiques par entreprise - calcul dynamique
   const entrepriseStats = useMemo(() => {
     const stats = {};
     
+    // Initialiser les stats pour chaque entreprise
+    entreprises.forEach(e => {
+      stats[e.id] = {
+        total: 0,
+        nouveau: 0,
+        enCours: 0,
+        termine: 0,
+        totalBudget: 0,
+        totalSurface: 0,
+        reports: []
+      };
+    });
+    
     reports.forEach(report => {
-      if (report.entreprise) {
-        if (!stats[report.entreprise]) {
-          stats[report.entreprise] = {
-            total: 0,
-            nouveau: 0,
-            enCours: 0,
-            termine: 0,
-            totalBudget: 0,
-            totalSurface: 0
-          };
+      // Trouver l'entreprise assignée (par id ou par nom)
+      const entrepriseId = report.entreprise_id || report.entreprise;
+      if (entrepriseId && stats[entrepriseId]) {
+        const status = (report.status || 'nouveau').toLowerCase();
+        stats[entrepriseId].total++;
+        stats[entrepriseId].totalBudget += Number(report.budget) || 0;
+        stats[entrepriseId].totalSurface += Number(report.surface) || 0;
+        stats[entrepriseId].reports.push(report);
+        
+        if (status === 'nouveau' || status === 'nouveaux') {
+          stats[entrepriseId].nouveau++;
+        } else if (status === 'en-cours' || status === 'en_cours') {
+          stats[entrepriseId].enCours++;
+        } else if (status === 'termine' || status === 'terminé') {
+          stats[entrepriseId].termine++;
         }
-        stats[report.entreprise].total++;
-        stats[report.entreprise][report.status === 'en-cours' ? 'enCours' : report.status]++;
-        stats[report.entreprise].totalBudget += report.budget || 0;
-        stats[report.entreprise].totalSurface += report.surface || 0;
       }
     });
 
     return stats;
-  }, [reports]);
+  }, [reports, entreprises]);
 
   // Signalements par entreprise
-  const getReportsByEntreprise = (entrepriseName) => {
-    return reports.filter(report => report.entreprise === entrepriseName);
+  const getReportsByEntreprise = (entrepriseId) => {
+    return entrepriseStats[entrepriseId]?.reports || [];
   };
 
   // Formater la date
@@ -148,14 +167,112 @@ export default function EntrepriseManager({ reports = [], onAssignEntreprise }) 
   };
 
   // Calculer le taux de complétion
-  const getCompletionRate = (entrepriseName) => {
-    const stats = entrepriseStats[entrepriseName];
+  const getCompletionRate = (entrepriseId) => {
+    const stats = entrepriseStats[entrepriseId];
     if (!stats || stats.total === 0) return 0;
     return Math.round((stats.termine / stats.total) * 100);
   };
 
+  // Trier les entreprises
+  const sortedEntreprises = useMemo(() => {
+    let filtered = [...entreprises];
+    
+    // Filtrer par recherche
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      filtered = filtered.filter(e => 
+        e.name.toLowerCase().includes(term) ||
+        e.specialite?.toLowerCase().includes(term)
+      );
+    }
+    
+    // Trier
+    filtered.sort((a, b) => {
+      const statsA = entrepriseStats[a.id] || { total: 0, totalBudget: 0, termine: 0 };
+      const statsB = entrepriseStats[b.id] || { total: 0, totalBudget: 0, termine: 0 };
+      
+      if (sortBy === 'budget') {
+        return statsB.totalBudget - statsA.totalBudget;
+      } else if (sortBy === 'total') {
+        return statsB.total - statsA.total;
+      } else if (sortBy === 'rate') {
+        const rateA = statsA.total > 0 ? (statsA.termine / statsA.total) : 0;
+        const rateB = statsB.total > 0 ? (statsB.termine / statsB.total) : 0;
+        return rateB - rateA;
+      }
+      return 0;
+    });
+    
+    return filtered;
+  }, [entreprises, searchTerm, sortBy, entrepriseStats]);
+
+  // Calcul des totaux globaux
+  const globalStats = useMemo(() => {
+    let totalBudget = 0;
+    let totalAssigned = 0;
+    let totalTermine = 0;
+    
+    Object.values(entrepriseStats).forEach(stats => {
+      totalBudget += stats.totalBudget;
+      totalAssigned += stats.total;
+      totalTermine += stats.termine;
+    });
+    
+    return {
+      totalBudget,
+      totalAssigned,
+      totalTermine,
+      avgRate: totalAssigned > 0 ? Math.round((totalTermine / totalAssigned) * 100) : 0
+    };
+  }, [entrepriseStats]);
+
   return (
     <div className="space-y-6">
+      {/* Stats globales des entreprises */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="card bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-blue-100 text-xs font-medium">Entreprises actives</p>
+              <p className="text-2xl font-bold mt-1">{entreprises.length}</p>
+            </div>
+            <Building2 className="h-8 w-8 text-blue-200" />
+          </div>
+        </div>
+        
+        <div className="card bg-gradient-to-br from-emerald-500 to-green-600 text-white">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-emerald-100 text-xs font-medium">Budget total géré</p>
+              <p className="text-2xl font-bold mt-1">{formatBudget(globalStats.totalBudget)}</p>
+              <p className="text-emerald-200 text-xs">MGA</p>
+            </div>
+            <DollarSign className="h-8 w-8 text-emerald-200" />
+          </div>
+        </div>
+        
+        <div className="card bg-gradient-to-br from-orange-500 to-red-500 text-white">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-orange-100 text-xs font-medium">Travaux assignés</p>
+              <p className="text-2xl font-bold mt-1">{globalStats.totalAssigned}</p>
+              <p className="text-orange-200 text-xs">{globalStats.totalTermine} terminés</p>
+            </div>
+            <AlertCircle className="h-8 w-8 text-orange-200" />
+          </div>
+        </div>
+        
+        <div className="card bg-gradient-to-br from-purple-500 to-pink-600 text-white">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-purple-100 text-xs font-medium">Taux complétion moyen</p>
+              <p className="text-2xl font-bold mt-1">{globalStats.avgRate}%</p>
+            </div>
+            <TrendingUp className="h-8 w-8 text-purple-200" />
+          </div>
+        </div>
+      </div>
+
       {/* En-tête */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -168,7 +285,18 @@ export default function EntrepriseManager({ reports = [], onAssignEntreprise }) 
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Tri */}
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value)}
+            className="px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="budget">Trier par budget</option>
+            <option value="total">Trier par travaux</option>
+            <option value="rate">Trier par performance</option>
+          </select>
+
           {/* Recherche */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -246,14 +374,14 @@ export default function EntrepriseManager({ reports = [], onAssignEntreprise }) 
 
       {/* Liste des entreprises */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {filteredEntreprises.map(entreprise => {
-          const stats = entrepriseStats[entreprise.name] || {};
-          const completionRate = getCompletionRate(entreprise.name);
+        {sortedEntreprises.map(entreprise => {
+          const stats = entrepriseStats[entreprise.id] || { total: 0, nouveau: 0, enCours: 0, termine: 0, totalBudget: 0, totalSurface: 0 };
+          const completionRate = getCompletionRate(entreprise.id);
 
           return (
             <div
               key={entreprise.id}
-              className="card hover:shadow-lg transition-shadow"
+              className={`card hover:shadow-lg transition-shadow ${stats.total > 0 ? 'border-l-4 border-l-blue-500' : ''}`}
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-start gap-3">
@@ -320,7 +448,7 @@ export default function EntrepriseManager({ reports = [], onAssignEntreprise }) 
               </div>
 
               {/* Statistiques */}
-              {stats.total > 0 && (
+              {stats.total > 0 ? (
                 <div className="mt-4 pt-4 border-t border-slate-200">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-slate-700">
@@ -365,14 +493,23 @@ export default function EntrepriseManager({ reports = [], onAssignEntreprise }) 
                     </div>
                   </div>
 
-                  {stats.totalBudget > 0 && (
-                    <div className="mt-3 flex items-center justify-between text-sm">
-                      <span className="text-slate-500">Budget géré:</span>
-                      <span className="font-medium text-slate-800">
-                        {formatBudget(stats.totalBudget)} MGA
-                      </span>
+                  {/* Budget et Surface */}
+                  <div className="mt-3 grid grid-cols-2 gap-3">
+                    <div className="flex items-center gap-2 p-2 bg-emerald-50 rounded-lg">
+                      <DollarSign className="h-4 w-4 text-emerald-600" />
+                      <div>
+                        <p className="text-xs text-emerald-600">Budget géré</p>
+                        <p className="font-bold text-emerald-700">{formatBudget(stats.totalBudget)} MGA</p>
+                      </div>
                     </div>
-                  )}
+                    <div className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg">
+                      <Ruler className="h-4 w-4 text-blue-600" />
+                      <div>
+                        <p className="text-xs text-blue-600">Surface totale</p>
+                        <p className="font-bold text-blue-700">{stats.totalSurface.toFixed(0)} m²</p>
+                      </div>
+                    </div>
+                  </div>
 
                   {/* Bouton pour voir les travaux assignés */}
                   <button
@@ -390,6 +527,10 @@ export default function EntrepriseManager({ reports = [], onAssignEntreprise }) 
                     )}
                   </button>
                 </div>
+              ) : (
+                <div className="mt-4 pt-4 border-t border-slate-200 text-center py-4">
+                  <p className="text-slate-400 text-sm">Aucun travail assigné</p>
+                </div>
               )}
 
               {/* Liste des travaux assignés (expansible) */}
@@ -400,7 +541,7 @@ export default function EntrepriseManager({ reports = [], onAssignEntreprise }) 
                     Travaux assignés à {entreprise.name}
                   </h4>
                   <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {getReportsByEntreprise(entreprise.name).map(report => (
+                    {getReportsByEntreprise(entreprise.id).map(report => (
                       <div
                         key={report.id}
                         className="p-3 bg-slate-50 rounded-lg border border-slate-200 hover:border-blue-300 transition-colors"
@@ -421,12 +562,12 @@ export default function EntrepriseManager({ reports = [], onAssignEntreprise }) 
                             <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
                               <span className="flex items-center gap-1">
                                 <Calendar className="h-3 w-3" />
-                                {formatDate(report.createdAt)}
+                                {formatDate(report.created_at || report.createdAt)}
                               </span>
-                              {report.quartierName && (
+                              {report.quartier && (
                                 <span className="flex items-center gap-1">
                                   <MapPin className="h-3 w-3" />
-                                  {report.quartierName}
+                                  {report.quartier}
                                 </span>
                               )}
                             </div>
@@ -434,7 +575,7 @@ export default function EntrepriseManager({ reports = [], onAssignEntreprise }) 
                           <div className="text-right">
                             {report.budget && (
                               <p className="text-sm font-semibold text-emerald-600">
-                                {formatBudget(report.budget)} MGA
+                                {formatBudget(Number(report.budget))} MGA
                               </p>
                             )}
                             {report.surface && (
@@ -450,19 +591,10 @@ export default function EntrepriseManager({ reports = [], onAssignEntreprise }) 
                 </div>
               )}
 
-              {/* Message si pas de travaux */}
-              {stats.total === 0 && (
-                <div className="mt-4 pt-4 border-t border-slate-200 text-center py-4">
-                  <p className="text-sm text-slate-400">
-                    Aucun travail assigné à cette entreprise
-                  </p>
-                </div>
-              )}
-
               {/* Bouton assigner */}
               {onAssignEntreprise && (
                 <button
-                  onClick={() => onAssignEntreprise(entreprise.name)}
+                  onClick={() => onAssignEntreprise(entreprise.id)}
                   className="mt-4 w-full py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
                 >
                   Sélectionner pour assignation
@@ -474,7 +606,7 @@ export default function EntrepriseManager({ reports = [], onAssignEntreprise }) 
       </div>
 
       {/* Message si aucun résultat */}
-      {filteredEntreprises.length === 0 && (
+      {sortedEntreprises.length === 0 && (
         <div className="text-center py-12">
           <Building2 className="h-12 w-12 text-slate-300 mx-auto mb-4" />
           <p className="text-slate-500">Aucune entreprise trouvée</p>

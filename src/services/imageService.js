@@ -15,7 +15,9 @@ export const IMAGE_CONFIG = {
   allowedExtensions: ['.jpg', '.jpeg', '.png', '.webp', '.gif'],
   maxImagesPerReport: 5,
   thumbnailSize: 200,
-  compressionQuality: 0.8
+  compressionQuality: 0.7, // Réduit de 0.8 à 0.7
+  maxWidth: 1280, // Réduit de 1920 à 1280
+  maxHeight: 960
 };
 
 // Dossier de stockage pour les signalements
@@ -65,58 +67,69 @@ const generateUniqueFileName = (originalName, reportId = '') => {
 };
 
 /**
- * Compresse une image avant l'upload
+ * Compresse une image avant l'upload (optimisé pour vitesse)
  * @param {File} file - Le fichier image
  * @param {number} quality - Qualité de compression (0-1)
  * @returns {Promise<Blob>} - Image compressée
  */
 export const compressImage = (file, quality = IMAGE_CONFIG.compressionQuality) => {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
+    // Si le fichier est déjà petit, ne pas compresser
+    if (file.size < 200 * 1024) { // < 200KB
+      resolve(file);
+      return;
+    }
+
+    const img = new Image();
+    const url = URL.createObjectURL(file);
     
-    reader.onload = (event) => {
-      const img = new Image();
-      img.src = event.target.result;
+    img.onload = () => {
+      URL.revokeObjectURL(url);
       
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        
-        // Calculer les dimensions (max 1920px de large)
-        let width = img.width;
-        let height = img.height;
-        const maxWidth = 1920;
-        
-        if (width > maxWidth) {
-          height = (height * maxWidth) / width;
-          width = maxWidth;
-        }
-        
-        canvas.width = width;
-        canvas.height = height;
-        
-        // Dessiner l'image redimensionnée
-        ctx.drawImage(img, 0, 0, width, height);
-        
-        // Convertir en blob
-        canvas.toBlob(
-          (blob) => {
-            if (blob) {
-              resolve(blob);
-            } else {
-              reject(new Error('Erreur lors de la compression'));
-            }
-          },
-          'image/jpeg',
-          quality
-        );
-      };
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
       
-      img.onerror = () => reject(new Error('Erreur lors du chargement de l\'image'));
+      // Calculer les dimensions (max 1280x960)
+      let width = img.width;
+      let height = img.height;
+      const maxWidth = IMAGE_CONFIG.maxWidth;
+      const maxHeight = IMAGE_CONFIG.maxHeight;
+      
+      if (width > maxWidth) {
+        height = (height * maxWidth) / width;
+        width = maxWidth;
+      }
+      if (height > maxHeight) {
+        width = (width * maxHeight) / height;
+        height = maxHeight;
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
+      
+      // Dessiner l'image redimensionnée
+      ctx.drawImage(img, 0, 0, width, height);
+      
+      // Convertir en blob
+      canvas.toBlob(
+        (blob) => {
+          if (blob) {
+            resolve(blob);
+          } else {
+            resolve(file); // Fallback au fichier original
+          }
+        },
+        'image/jpeg',
+        quality
+      );
     };
     
-    reader.onerror = () => reject(new Error('Erreur lors de la lecture du fichier'));
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve(file); // Fallback au fichier original
+    };
+    
+    img.src = url;
   });
 };
 
@@ -144,9 +157,13 @@ export const uploadImage = async (file, reportId = 'temp', onProgress = null) =>
     let fileToUpload = file;
     try {
       const compressedBlob = await compressImage(file);
-      fileToUpload = new File([compressedBlob], file.name, { type: 'image/jpeg' });
+      // Ne créer un nouveau File que si la compression a réduit la taille
+      if (compressedBlob.size < file.size) {
+        fileToUpload = new File([compressedBlob], file.name, { type: 'image/jpeg' });
+        console.log(`Image compressée: ${(file.size/1024).toFixed(0)}KB → ${(compressedBlob.size/1024).toFixed(0)}KB`);
+      }
     } catch (error) {
-      console.warn('Compression échouée, utilisation du fichier original:', error);
+      console.warn('Compression échouée, utilisation du fichier original');
     }
 
     // Générer le chemin de stockage
@@ -154,15 +171,9 @@ export const uploadImage = async (file, reportId = 'temp', onProgress = null) =>
     const filePath = `${REPORTS_IMAGES_FOLDER}/${reportId}/${fileName}`;
     const storageRef = ref(storage, filePath);
 
-    // Métadonnées personnalisées
+    // Métadonnées simplifiées pour upload plus rapide
     const metadata = {
-      contentType: fileToUpload.type,
-      customMetadata: {
-        uploadedBy: auth.currentUser.uid,
-        uploadedAt: new Date().toISOString(),
-        originalName: file.name,
-        reportId: reportId
-      }
+      contentType: fileToUpload.type
     };
 
     // Upload avec suivi de progression

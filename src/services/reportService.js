@@ -132,6 +132,49 @@ export const createReport = async (reportData) => {
 };
 
 /**
+ * Créer un signalement directement dans Firebase (pour la synchronisation)
+ * Contourne la vérification d'authentification
+ */
+export const createReportDirect = async (reportData) => {
+  try {
+    // Validation minimale
+    if (!reportData.latitude || !reportData.longitude) {
+      return { id: null, error: 'Position géographique requise' };
+    }
+
+    if (!reportData.type) {
+      return { id: null, error: 'Type de problème requis' };
+    }
+
+    const data = {
+      userId: reportData.userId || null,
+      userEmail: reportData.userEmail || null,
+      type: reportData.type,
+      description: reportData.description || '',
+      latitude: parseFloat(reportData.latitude),
+      longitude: parseFloat(reportData.longitude),
+      quartier: reportData.quartier || null,
+      arrondissement: reportData.arrondissement || null,
+      status: reportData.status || 'nouveau',
+      images: reportData.images || [],
+      statusHistory: reportData.statusHistory || [],
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      syncedFromLocal: true,
+      localId: reportData.localId || null
+    };
+
+    const docRef = await addDoc(collection(db, REPORTS_COLLECTION), data);
+    console.log(`✅ Signalement créé dans Firebase: ${docRef.id}`);
+    
+    return { id: docRef.id, error: null };
+  } catch (error) {
+    console.error('Erreur création signalement Firebase:', error);
+    return { id: null, error: error.message };
+  }
+};
+
+/**
  * Récupérer tous les signalements
  * Accessible à tous (visiteurs inclus)
  */

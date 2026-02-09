@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  # Serveur de tuiles avec nginx (tuiles raster)
+  tile-server:
+    image: nginx:alpine
+    container_name: road-reporter-tiles
+    ports:
+      - "8080:80"
+    volumes:
+      - ./tiles:/usr/share/nginx/html/tiles:ro
+      - ./nginx-tiles.conf:/etc/nginx/conf.d/default.conf:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  default:
+    name: road-reporter-network

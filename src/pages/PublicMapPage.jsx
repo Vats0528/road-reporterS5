@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import RoadMap from '../components/RoadMap';
 import SummaryTable from '../components/SummaryTable';
 import SearchFilters from '../components/SearchFilters';
-import { getAllReports, getReportsStats } from '../services/reportService';
+import { getAllReports, getReportsStats } from '../services/localDbService';
 import { usePermissions } from '../hooks/usePermissions';
 import { MapPin, LogIn, UserPlus, RefreshCw, Eye, Lock } from 'lucide-react';
 

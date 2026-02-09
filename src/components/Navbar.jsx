@@ -4,7 +4,7 @@ import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
 import { LogOut, Menu, X, MapPin, User, Settings, Eye, Clock, AlertTriangle } from 'lucide-react';
 import UserProfileModal from './UserProfileModal';
-import { isSessionValid, getSessionTimeRemaining, endSession } from '../services/authService';
+import { isSessionValidLocal, getSessionTimeRemainingLocal } from '../services/localAuthService';
 import { SESSION_WARNING_BEFORE_EXPIRY } from '../utils/constants';
 
 export default function Navbar() {
@@ -21,13 +21,13 @@ export default function Navbar() {
     if (!currentUser) return;
 
     const checkSession = () => {
-      if (!isSessionValid()) {
+      if (!isSessionValidLocal()) {
         // Session expirée, déconnecter l'utilisateur
         handleLogout();
         return;
       }
 
-      const timeRemaining = getSessionTimeRemaining();
+      const timeRemaining = getSessionTimeRemainingLocal();
       setSessionTimeLeft(timeRemaining);
       
       // Afficher un avertissement si moins de 5 minutes restantes
@@ -57,7 +57,6 @@ export default function Navbar() {
   };
 
   const handleLogout = async () => {
-    endSession(); // Nettoyer la session
     await logout();
     setIsMenuOpen(false);
   };

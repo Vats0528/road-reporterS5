@@ -4,6 +4,38 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { QUARTIERS, ARRONDISSEMENTS } from '../data/quartiers';
 
+// Configuration des tuiles
+const TILE_CONFIG = {
+  // Mode offline: utilise le serveur local Docker (tuiles téléchargées)
+  offline: {
+    url: 'http://localhost:8080/tiles/{z}/{x}/{y}.png',
+    attribution: '© OpenStreetMap (cache local)',
+    maxZoom: 19,
+    minZoom: 8
+  },
+  // Mode online: utilise OpenStreetMap directement
+  online: {
+    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 19,
+    minZoom: 1
+  }
+};
+
+// Détecter si le serveur de tuiles local est disponible
+const checkOfflineAvailable = async () => {
+  try {
+    const response = await fetch('http://localhost:8080/health', { 
+      method: 'GET',
+      mode: 'cors',
+      cache: 'no-cache'
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
 // Fix for default markers
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -433,7 +465,7 @@ const ReportPopup = ({ report }) => {
         fontSize: '11px',
         color: '#64748b'
       }}>
-        🧭 GPS: {report.latitude?.toFixed(6)}, {report.longitude?.toFixed(6)}
+        🧭 GPS: {parseFloat(report.latitude)?.toFixed(6)}, {parseFloat(report.longitude)?.toFixed(6)}
       </div>
     </div>
   );
@@ -622,11 +654,24 @@ export default function RoadMap({
   height = '100%'
 }) {
   const [tempMarker, setTempMarker] = useState(null);
+  // Utiliser OpenStreetMap online (tuiles offline non disponibles)
+  const [useOfflineTiles, setUseOfflineTiles] = useState(false);
+  const [tileServerChecked, setTileServerChecked] = useState(true);
   const mapRef = useRef(null);
 
   // Centre de la carte (Antananarivo)
   const defaultCenter = [-18.8769, 47.5333];
   const defaultZoom = 12;
+
+  // Mode online - tuiles OpenStreetMap
+  useEffect(() => {
+    console.log('🗺️ Mode online - Utilisation des tuiles OpenStreetMap');
+  }, []);
+
+  // Configuration des tuiles selon le mode
+  const tileConfig = useMemo(() => {
+    return useOfflineTiles ? TILE_CONFIG.offline : TILE_CONFIG.online;
+  }, [useOfflineTiles]);
 
   // Gérer le clic pour ajouter un marqueur temporaire
   const handleMapClick = useCallback((latlng) => {
@@ -660,6 +705,26 @@ export default function RoadMap({
 
   return (
     <div style={{ height, width: '100%', position: 'relative' }}>
+      {/* Indicateur mode offline/online */}
+      <div style={{
+        position: 'absolute',
+        bottom: '10px',
+        left: '10px',
+        zIndex: 1000,
+        background: useOfflineTiles ? '#10b981' : '#3b82f6',
+        color: 'white',
+        padding: '4px 8px',
+        borderRadius: '4px',
+        fontSize: '10px',
+        fontWeight: '600',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '4px',
+        boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+      }}>
+        {useOfflineTiles ? '📴 Offline' : '🌐 Online'}
+      </div>
+
       {/* Légende */}
       <div style={{
         position: 'absolute',
@@ -734,8 +799,11 @@ export default function RoadMap({
         className="rounded-lg shadow-lg"
       >
         <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url={tileConfig.url}
+          attribution={tileConfig.attribution}
+          maxZoom={tileConfig.maxZoom}
+          minZoom={tileConfig.minZoom}
+          errorTileUrl="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
         />
         
         {/* Gestionnaire d'événements */}

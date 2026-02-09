@@ -1,0 +1,576 @@
+/**
+ * Service de données local
+ * Utilise PostgreSQL local pour toutes les opérations
+ * La synchronisation avec Firebase se fait en arrière-plan
+ */
+
+import { 
+  getAllReports as getFirebaseReports, 
+  createReportDirect as createFirebaseReport,
+  updateReportStatus as updateFirebaseStatus
+} from './reportService';
+import {
+  createEntrepriseFirebase,
+  getAllEntreprisesFirebase
+} from './entrepriseService';
+
+const API_URL = 'http://localhost:3001/api';
+
+// ============================================================================
+// OPÉRATIONS CRUD (toujours via PostgreSQL local)
+// ============================================================================
+
+/**
+ * Récupère tous les signalements depuis la base locale
+ */
+export const getAllReports = async () => {
+  try {
+    const response = await fetch(`${API_URL}/reports`);
+    if (!response.ok) throw new Error('Erreur API locale');
+    const data = await response.json();
+    return { reports: data.reports || [], error: null };
+  } catch (error) {
+    console.error('Erreur getAllReports local:', error);
+    return { reports: [], error: error.message };
+  }
+};
+
+/**
+ * Récupère les signalements d'un utilisateur (par ID ou email)
+ */
+export const getUserReports = async (userId, userEmail = null) => {
+  try {
+    // Envoie les deux paramètres pour matcher soit par ID soit par email
+    const params = new URLSearchParams();
+    if (userId) params.append('userId', userId);
+    if (userEmail) params.append('userEmail', userEmail);
+    
+    const response = await fetch(`${API_URL}/reports?${params.toString()}`);
+    if (!response.ok) throw new Error('Erreur API locale');
+    const data = await response.json();
+    return { reports: data.reports || [], error: null };
+  } catch (error) {
+    console.error('Erreur getUserReports local:', error);
+    return { reports: [], error: error.message };
+  }
+};
+
+/**
+ * Crée un signalement localement
+ */
+export const createReport = async (reportData) => {
+  try {
+    const response = await fetch(`${API_URL}/reports`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reportData)
+    });
+    if (!response.ok) throw new Error('Erreur création');
+    const data = await response.json();
+    return { id: data.report?.id, error: null };
+  } catch (error) {
+    console.error('Erreur createReport local:', error);
+    return { id: null, error: error.message };
+  }
+};
+
+/**
+ * Met à jour un signalement
+ */
+export const updateReport = async (reportId, updateData) => {
+  try {
+    const response = await fetch(`${API_URL}/reports/${reportId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updateData)
+    });
+    if (!response.ok) throw new Error('Erreur mise à jour');
+    return { success: true, error: null };
+  } catch (error) {
+    console.error('Erreur updateReport local:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Met à jour le statut d'un signalement (local, sera synchronisé vers Firebase)
+ */
+export const updateReportStatus = async (reportId, status, changedByRole, changedByEmail) => {
+  try {
+    const changedBy = changedByEmail || changedByRole || 'unknown';
+    const response = await fetch(`${API_URL}/reports/${reportId}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, changedBy })
+    });
+    if (!response.ok) throw new Error('Erreur mise à jour statut');
+    console.log(`✏️ Statut mis à jour localement: ${reportId} → ${status}`);
+    return { success: true, error: null };
+  } catch (error) {
+    console.error('Erreur updateReportStatus local:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Supprime un signalement
+ */
+export const deleteReport = async (reportId) => {
+  try {
+    const response = await fetch(`${API_URL}/reports/${reportId}`, {
+      method: 'DELETE'
+    });
+    if (!response.ok) throw new Error('Erreur suppression');
+    return { success: true, error: null };
+  } catch (error) {
+    console.error('Erreur deleteReport local:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Récupère les statistiques depuis l'API
+ */
+export const getReportsStatsFromApi = async () => {
+  try {
+    const response = await fetch(`${API_URL}/stats`);
+    if (!response.ok) throw new Error('Erreur stats');
+    const data = await response.json();
+    return data.stats || {};
+  } catch (error) {
+    console.error('Erreur getReportsStats local:', error);
+    return {};
+  }
+};
+
+/**
+ * Calcule les statistiques à partir d'un tableau de signalements
+ */
+export const getReportsStats = (reports = []) => {
+  if (!Array.isArray(reports) || reports.length === 0) { 
+    return { 
+      total: 0, nouveau: 0, enCours: 0, termine: 0, 
+      avancement: 0, totalSurface: 0, totalBudget: 0 
+    };
+  }
+  
+  let nouveau = 0;
+  let enCours = 0;
+  let termine = 0;
+  let totalSurface = 0;
+  let totalBudget = 0;
+
+  for (let i = 0; i < reports.length; i++) {
+    const report = reports[i];
+    const status = (report.status || 'nouveau').toLowerCase();
+    
+    // Compter par statut
+    if (status === 'nouveau' || status === 'nouveaux') {
+      nouveau++;
+    } else if (status === 'en-cours' || status === 'en_cours' || status === 'en cours' || status === 'encours') {
+      enCours++;
+    } else if (status === 'termine' || status === 'terminé' || status === 'termines' || status === 'terminés') {
+      termine++;
+    } else {
+      nouveau++; // Par défaut
+    }
+    
+    // Calculer surface et budget (conversion explicite en nombre)
+    const surfaceNum = Number(report.surface);
+    const budgetNum = Number(report.budget);
+    
+    if (!isNaN(surfaceNum) && surfaceNum > 0) {
+      totalSurface = totalSurface + surfaceNum;
+    }
+    if (!isNaN(budgetNum) && budgetNum > 0) {
+      totalBudget = totalBudget + budgetNum;
+    }
+  }
+
+  const total = reports.length;
+  
+  // Progression: terminé = 100%, en cours = 50%, nouveau = 0%
+  const avancement = total > 0 
+    ? Math.round(((termine * 100) + (enCours * 50)) / total) 
+    : 0;
+
+  return {
+    total,
+    nouveau,
+    enCours,
+    termine,
+    avancement,
+    totalSurface: Math.round(totalSurface * 100) / 100,
+    totalBudget: Math.round(totalBudget)
+  };
+};
+
+// ============================================================================
+// SYNCHRONISATION AVEC FIREBASE
+// ============================================================================
+
+/**
+ * Vérifie si l'API locale est disponible
+ */
+export const isLocalApiAvailable = async () => {
+  try {
+    const response = await fetch(`${API_URL}/health`, { cache: 'no-cache' });
+    return response.ok;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Récupère le nombre d'éléments en attente de sync
+ */
+export const getPendingSyncCount = async () => {
+  try {
+    const response = await fetch(`${API_URL}/sync/pending`);
+    const data = await response.json();
+    return data.totalPending || 0;
+  } catch {
+    return 0;
+  }
+};
+
+/**
+ * Synchronise les données locales vers Firebase (nouveaux + modifiés)
+ */
+export const syncToFirebase = async () => {
+  try {
+    console.log('🔄 === DÉBUT SYNCHRONISATION LOCAL → FIREBASE ===');
+    
+    // Récupérer les éléments non synchronisés
+    const response = await fetch(`${API_URL}/sync/pending`);
+    const pending = await response.json();
+    
+    console.log(`📤 ${pending.reports?.length || 0} signalements à synchroniser`);
+    console.log(`🏢 ${pending.entreprises?.length || 0} entreprises à synchroniser`);
+    
+    let created = 0;
+    let updated = 0;
+    let entreprisesSynced = 0;
+    const errors = [];
+
+    // ===== SYNCHRONISER LES ENTREPRISES =====
+    for (const entreprise of pending.entreprises || []) {
+      try {
+        const firebaseData = {
+          id: entreprise.id,
+          name: entreprise.name,
+          contact: entreprise.contact,
+          phone: entreprise.phone,
+          email: entreprise.email,
+          address: entreprise.address,
+          specialties: typeof entreprise.specialties === 'string' 
+            ? JSON.parse(entreprise.specialties || '[]') 
+            : (entreprise.specialties || [])
+        };
+
+        console.log(`   🏢 Sync entreprise: ${entreprise.name}`);
+        const result = await createEntrepriseFirebase(firebaseData);
+        
+        if (result.id) {
+          await fetch(`${API_URL}/sync/mark-synced`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ table: 'entreprises', ids: [entreprise.id] })
+          });
+          entreprisesSynced++;
+        } else {
+          errors.push({ id: entreprise.id, type: 'entreprise', error: result.error });
+        }
+      } catch (err) {
+        console.error(`   ❌ Erreur entreprise: ${entreprise.id}`, err.message);
+        errors.push({ id: entreprise.id, type: 'entreprise', error: err.message });
+      }
+    }
+
+    // ===== SYNCHRONISER LES SIGNALEMENTS =====
+    // Envoyer chaque signalement vers Firebase
+    for (const report of pending.reports || []) {
+      try {
+        // Vérifier si c'est un nouveau signalement ou une mise à jour
+        const hasFirebaseId = report.firebase_id && report.firebase_id !== report.id;
+        const isFirebaseId = report.id.match(/^[a-zA-Z0-9]{20}$/);
+        const isLocalCreation = !hasFirebaseId && !isFirebaseId;
+
+        if (isLocalCreation || !hasFirebaseId) {
+          // Nouveau signalement - créer dans Firebase
+          const firebaseData = {
+            userId: report.user_id || null,
+            userEmail: report.user_email || null,
+            type: report.type,
+            description: report.description || '',
+            latitude: parseFloat(report.latitude),
+            longitude: parseFloat(report.longitude),
+            quartier: report.quartier || null,
+            arrondissement: report.arrondissement || null,
+            images: typeof report.images === 'string' ? JSON.parse(report.images || '[]') : (report.images || []),
+            statusHistory: typeof report.status_history === 'string' ? JSON.parse(report.status_history || '[]') : (report.status_history || []),
+            status: report.status || 'nouveau',
+            localId: report.id
+          };
+
+          console.log(`   📝 Création Firebase: ${report.id} (${report.type})`);
+          const result = await createFirebaseReport(firebaseData);
+          
+          if (result.id) {
+            // Mettre à jour l'ID Firebase dans la base locale
+            await fetch(`${API_URL}/reports/${report.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ firebase_id: result.id })
+            });
+            
+            await fetch(`${API_URL}/sync/mark-synced`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ table: 'road_reports', ids: [report.id] })
+            });
+            created++;
+            console.log(`   ✅ Créé: ${report.id} → Firebase ID: ${result.id}`);
+          } else {
+            console.error(`   ❌ Échec création: ${result.error}`);
+            errors.push({ id: report.id, type: 'report', error: result.error });
+          }
+        } else {
+          // Signalement existant - mettre à jour le statut dans Firebase
+          const firebaseId = report.firebase_id || report.id;
+          console.log(`   ✏️ Mise à jour statut: ${firebaseId} → ${report.status}`);
+          
+          const result = await updateFirebaseStatus(firebaseId, report.status, 'manager');
+          
+          if (result.success) {
+            await fetch(`${API_URL}/sync/mark-synced`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ table: 'road_reports', ids: [report.id] })
+            });
+            updated++;
+          } else {
+            console.warn(`   ⚠️ Erreur update Firebase: ${result.error}`);
+            errors.push({ id: report.id, error: result.error });
+          }
+        }
+      } catch (err) {
+        console.error(`   ❌ Erreur: ${report.id}`, err.message);
+        errors.push({ id: report.id, error: err.message });
+      }
+    }
+
+    console.log('✅ === SYNCHRONISATION LOCAL → FIREBASE TERMINÉE ===');
+    console.log(`   ✓ Signalements: ${created} créés, ${updated} mis à jour`);
+    console.log(`   ✓ Entreprises: ${entreprisesSynced} synchronisées`);
+    if (errors.length > 0) {
+      console.warn(`   ⚠️ ${errors.length} erreurs`);
+    }
+
+    return { 
+      success: true, 
+      created, 
+      updated, 
+      entreprisesSynced,
+      synced: created + updated + entreprisesSynced, 
+      errors 
+    };
+  } catch (error) {
+    console.error('❌ Exception syncToFirebase:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Importe les données de Firebase vers local (signalements + entreprises)
+ * Note: Les utilisateurs sont gérés localement, pas de sync depuis Firebase
+ */
+export const syncFromFirebase = async () => {
+  try {
+    console.log('🔄 === DÉBUT SYNCHRONISATION FIREBASE → LOCAL ===');
+    
+    // 1. Récupérer les SIGNALEMENTS de Firebase
+    console.log('📋 Récupération des signalements Firebase...');
+    const { reports: firebaseReports, error: reportsError } = await getFirebaseReports();
+    
+    if (reportsError) {
+      console.error('❌ Erreur récupération reports:', reportsError);
+      return { success: false, error: reportsError };
+    }
+    
+    console.log(`📋 ${firebaseReports?.length || 0} signalements trouvés dans Firebase`);
+
+    // FILTRER les signalements qui ont été synchronisés depuis le local
+    // pour éviter les doublons
+    const reportsToImport = (firebaseReports || []).filter(report => {
+      // Ignorer les signalements qui ont été créés depuis le local
+      if (report.syncedFromLocal === true) {
+        console.log(`   ⏭️ Ignoré (syncedFromLocal): ${report.id}`);
+        return false;
+      }
+      // Ignorer si le localId existe (c'est un signalement qu'on a envoyé)
+      if (report.localId) {
+        console.log(`   ⏭️ Ignoré (a localId): ${report.id} → ${report.localId}`);
+        return false;
+      }
+      return true;
+    });
+
+    console.log(`📋 ${reportsToImport.length} signalements à importer (après filtrage)`);
+
+    // Formater les signalements
+    const formattedReports = reportsToImport.map(report => {
+      let createdAt = report.createdAt;
+      if (createdAt && typeof createdAt.toDate === 'function') {
+        createdAt = createdAt.toDate().toISOString();
+      } else if (createdAt instanceof Date) {
+        createdAt = createdAt.toISOString();
+      } else if (typeof createdAt === 'string') {
+        createdAt = createdAt;
+      } else {
+        createdAt = new Date().toISOString();
+      }
+
+      return {
+        id: report.id,
+        userId: report.userId || report.user_id || null,
+        userEmail: report.userEmail || report.user_email || null,
+        type: report.type || 'autre',
+        description: report.description || '',
+        latitude: parseFloat(report.latitude) || 0,
+        longitude: parseFloat(report.longitude) || 0,
+        quartier: report.quartier || null,
+        arrondissement: report.arrondissement || null,
+        status: report.status || 'nouveau',
+        images: Array.isArray(report.images) ? report.images : [],
+        statusHistory: Array.isArray(report.statusHistory) ? report.statusHistory : 
+                       Array.isArray(report.status_history) ? report.status_history : [],
+        createdAt: createdAt,
+        syncedFromLocal: report.syncedFromLocal || false,
+        localId: report.localId || null
+      };
+    });
+
+    console.log('📤 Envoi vers PostgreSQL local...');
+    console.log(`   - ${formattedReports.length} signalements`);
+
+    // 2. Récupérer les ENTREPRISES de Firebase
+    console.log('🏢 Récupération des entreprises Firebase...');
+    let formattedEntreprises = [];
+    try {
+      const { entreprises: firebaseEntreprises, error: entreprisesError } = await getAllEntreprisesFirebase();
+      if (!entreprisesError && firebaseEntreprises) {
+        console.log(`🏢 ${firebaseEntreprises.length} entreprises trouvées`);
+        formattedEntreprises = firebaseEntreprises.map(e => ({
+          id: e.id,
+          name: e.name,
+          contact: e.contact || null,
+          phone: e.phone || null,
+          email: e.email || null,
+          address: e.address || null,
+          specialties: e.specialties || []
+        }));
+      } else if (entreprisesError) {
+        console.warn('⚠️ Erreur récupération entreprises:', entreprisesError);
+      }
+    } catch (err) {
+      console.warn('⚠️ Erreur entreprises Firebase:', err.message);
+    }
+
+    console.log(`   - ${formattedEntreprises.length} entreprises`);
+
+    // 3. Envoyer à l'API locale (sans users)
+    const response = await fetch(`${API_URL}/sync/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        reports: formattedReports, 
+        users: [],  // Pas de sync users depuis Firebase
+        entreprises: formattedEntreprises
+      })
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Erreur API:', response.status, errorText);
+      return { success: false, error: `Erreur API: ${response.status}` };
+    }
+
+    const result = await response.json();
+    
+    console.log('✅ === SYNCHRONISATION TERMINÉE ===');
+    console.log(`   ✓ ${result.imported?.reports || 0} signalements importés`);
+    console.log(`   ✓ ${result.imported?.entreprises || 0} entreprises importées`);
+    
+    // Afficher les erreurs s'il y en a
+    if (result.errors && result.errors.length > 0) {
+      console.warn('⚠️ Erreurs durant l\'import:');
+      result.errors.forEach(err => {
+        console.warn(`   - ${err.type} ${err.id}: ${err.error}`);
+      });
+    }
+    
+    return { 
+      success: true, 
+      imported: {
+        reports: result.imported?.reports || 0,
+        entreprises: result.imported?.entreprises || 0
+      },
+      errors: result.errors
+    };
+  } catch (error) {
+    console.error('❌ Exception syncFromFirebase:', error);
+    return { success: false, error: error.message };
+  }
+};
+
+/**
+ * Synchronisation complète bidirectionnelle
+ */
+export const fullSync = async (onProgress = null) => {
+  const results = {
+    success: true,
+    pushed: 0,
+    pulled: 0,
+    errors: []
+  };
+
+  try {
+    if (onProgress) onProgress(10);
+
+    // 1. Push local → Firebase
+    const pushResult = await syncToFirebase();
+    results.pushed = pushResult.synced || 0;
+    if (pushResult.errors) results.errors.push(...pushResult.errors);
+
+    if (onProgress) onProgress(50);
+
+    // 2. Pull Firebase → local
+    const pullResult = await syncFromFirebase();
+    results.pulled = pullResult.imported || 0;
+
+    if (onProgress) onProgress(100);
+
+    results.success = true;
+    return results;
+  } catch (error) {
+    results.success = false;
+    results.error = error.message;
+    return results;
+  }
+};
+
+export default {
+  getAllReports,
+  getUserReports,
+  createReport,
+  updateReport,
+  updateReportStatus,
+  deleteReport,
+  getReportsStats,
+  isLocalApiAvailable,
+  getPendingSyncCount,
+  syncToFirebase,
+  syncFromFirebase,
+  fullSync
+};

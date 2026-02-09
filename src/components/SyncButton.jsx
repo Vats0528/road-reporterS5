@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { RefreshCw, Check, AlertCircle, Cloud, CloudOff } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { RefreshCw, Check, AlertCircle, Cloud } from 'lucide-react';
+import { fullSync, getPendingSyncCount } from '../services/localDbService';
 
 /**
- * Composant bouton de synchronisation réutilisable
- * Affiche l'état de synchronisation avec Firebase
+ * Composant bouton de synchronisation
+ * Synchronise la base PostgreSQL locale avec Firebase
  */
 export default function SyncButton({ 
   onSync, 
@@ -19,6 +20,18 @@ export default function SyncButton({
   const [syncing, setSyncing] = useState(false);
   const [syncStatus, setSyncStatus] = useState('idle'); // 'idle' | 'syncing' | 'success' | 'error'
   const [lastSyncTime, setLastSyncTime] = useState(null);
+  const [pendingCount, setPendingCount] = useState(0);
+
+  // Vérifier le nombre d'éléments en attente
+  useEffect(() => {
+    const checkPending = async () => {
+      const count = await getPendingSyncCount();
+      setPendingCount(count);
+    };
+    checkPending();
+    const interval = setInterval(checkPending, 30000);
+    return () => clearInterval(interval);
+  }, [syncing]);
 
   const handleSync = async () => {
     if (syncing) return;
@@ -27,11 +40,20 @@ export default function SyncButton({
     setSyncStatus('syncing');
 
     try {
-      if (onSync) {
-        await onSync();
+      const result = await fullSync();
+      
+      if (result.success) {
+        setSyncStatus('success');
+        setLastSyncTime(new Date());
+        setPendingCount(0);
+      } else {
+        throw new Error(result.error || 'Erreur de synchronisation');
       }
-      setSyncStatus('success');
-      setLastSyncTime(new Date());
+      
+      // Callback personnalisé si fourni
+      if (onSync) {
+        await onSync(result);
+      }
       
       // Revenir à l'état idle après 2 secondes
       setTimeout(() => {
@@ -144,80 +166,22 @@ export default function SyncButton({
         {showLabel && <span>{getLabel()}</span>}
       </button>
       
-      {/* Indicateur de dernière synchronisation (optionnel) */}
-      {lastSyncTime && syncStatus === 'idle' && (
-        <span className="text-xs text-slate-400 flex items-center gap-1">
-          <Cloud className="h-3 w-3" />
-          {formatLastSync()}
-        </span>
+      {/* Indicateur de dernière synchronisation et éléments en attente */}
+      {syncStatus === 'idle' && (
+        <div className="flex items-center gap-2 text-xs text-slate-400">
+          {pendingCount > 0 && (
+            <span className="bg-orange-100 text-orange-600 px-2 py-0.5 rounded-full font-medium">
+              {pendingCount} en attente
+            </span>
+          )}
+          {lastSyncTime && (
+            <span className="flex items-center gap-1">
+              <Cloud className="h-3 w-3" />
+              {formatLastSync()}
+            </span>
+          )}
+        </div>
       )}
     </div>
-  );
-}
-
-/**
- * Indicateur de statut de connexion Firebase
- */
-export function ConnectionStatus({ isOnline = true, className = '' }) {
-  return (
-    <div className={`flex items-center gap-2 text-sm ${className}`}>
-      {isOnline ? (
-        <>
-          <Cloud className="h-4 w-4 text-emerald-500" />
-          <span className="text-emerald-600 font-medium">Connecté</span>
-        </>
-      ) : (
-        <>
-          <CloudOff className="h-4 w-4 text-red-500" />
-          <span className="text-red-600 font-medium">Hors ligne</span>
-        </>
-      )}
-    </div>
-  );
-}
-
-/**
- * Bouton de synchronisation compact pour la barre de navigation
- */
-export function NavSyncButton({ onSync, className = '' }) {
-  const [syncing, setSyncing] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
-
-  const handleSync = async () => {
-    if (syncing) return;
-    
-    setSyncing(true);
-    try {
-      if (onSync) await onSync();
-      setShowSuccess(true);
-      setTimeout(() => setShowSuccess(false), 2000);
-    } catch (error) {
-      console.error('Sync error:', error);
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  return (
-    <button
-      onClick={handleSync}
-      disabled={syncing}
-      className={`
-        p-2 rounded-lg transition-all duration-200
-        ${showSuccess 
-          ? 'bg-emerald-100 text-emerald-600' 
-          : 'hover:bg-slate-100 text-slate-600'
-        }
-        ${syncing ? 'cursor-not-allowed opacity-50' : ''}
-        ${className}
-      `}
-      title="Synchroniser"
-    >
-      {showSuccess ? (
-        <Check className="h-5 w-5" />
-      ) : (
-        <RefreshCw className={`h-5 w-5 ${syncing ? 'animate-spin' : ''}`} />
-      )}
-    </button>
   );
 }
