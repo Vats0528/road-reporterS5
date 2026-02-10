@@ -3,3 +3,6 @@ manager@routestana.mg	manager123
 user@test.mg	user123
 v@gmail.com		vats123
 manager@test.mg	    manager123	
+
+si mobile:
+manager@routestana.mg	Manager@123 

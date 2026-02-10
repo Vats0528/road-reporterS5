@@ -10,13 +10,16 @@ import EntrepriseManager from '../components/EntrepriseManager';
 import UserManager from '../components/UserManager';
 import SyncButton from '../components/SyncButton';
 import ReportHistory, { useLocalHistory, HISTORY_ACTIONS } from '../components/ReportHistory';
+import DelayStats from '../components/DelayStats';
+import PriceSettings from '../components/PriceSettings';
 import { getAllReports, updateReport, updateReportStatus, deleteReport, getReportsStats } from '../services/localDbService';
 import { downloadCSV, printReport, downloadJSON } from '../services/exportService';
 import { validateReports, ValidationSummary } from '../services/validationService.jsx';
 import { QUARTIERS, ARRONDISSEMENTS } from '../data/quartiers';
 import { 
   RefreshCw, Edit, Save, X, Download, Trash2, AlertTriangle, Shield, Image, MapPin,
-  FileText, BarChart3, Building2, History, CheckCircle, FileJson, Printer, Users
+  FileText, BarChart3, Building2, History, CheckCircle, FileJson, Printer, Users,
+  Clock, Settings
 } from 'lucide-react';
 
 // Liste des entreprises (à terme, à récupérer depuis la base)
@@ -121,33 +124,59 @@ const ManagerPanel = () => {
       type: report.type,
       surface: report.surface || '',
       budget: report.budget || '',
+      niveau: report.niveau || 1,
       entreprise: report.entreprise_id || report.entreprise || '',
       status: report.status
     });
   };
 
+  // Calculer le budget automatiquement
+  const calculateBudget = async (niveau, surface) => {
+    if (!niveau || !surface) return;
+    try {
+      const response = await fetch(`http://localhost:3001/api/calculate-budget?niveau=${niveau}&surface=${surface}`);
+      const data = await response.json();
+      if (data.success) {
+        setEditingReport(prev => ({ ...prev, budget: data.budget }));
+      }
+    } catch (err) {
+      console.error('Erreur calcul budget:', err);
+    }
+  };
+
   const handleSaveReport = async () => {
     if (!editingReport) return;
 
-    const updateData = {
-      surface: parseFloat(editingReport.surface) || null,
-      budget: parseFloat(editingReport.budget) || null,
-      entreprise: editingReport.entreprise || null,
-      status: editingReport.status
-    };
-
-    console.log('Mise à jour du signalement:', editingReport.id, updateData);
-
-    // Passer le rôle pour la vérification des permissions
-    const result = await updateReport(editingReport.id, updateData, userData?.role);
-    
-    if (!result.error && result.success) {
-      await loadReports();
-      setEditingReport(null);
-      showNotification('Signalement mis à jour avec succès !');
-    } else {
-      showNotification(result.error || 'Erreur lors de la mise à jour', 'error');
+    // Utiliser l'endpoint avec calcul automatique du budget
+    try {
+      const response = await fetch(`http://localhost:3001/api/reports/${editingReport.id}/with-budget`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          niveau: parseInt(editingReport.niveau) || 1,
+          surface: parseFloat(editingReport.surface) || 0,
+          status: editingReport.status,
+          entreprise_id: editingReport.entreprise || null
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        await loadReports();
+        setEditingReport(null);
+        showNotification(`Signalement mis à jour ! Budget: ${new Intl.NumberFormat('fr-MG').format(result.budgetDetails.budget)} MGA`);
+      } else {
+        showNotification(result.error || 'Erreur lors de la mise à jour', 'error');
+      }
+    } catch (err) {
+      showNotification('Erreur: ' + err.message, 'error');
     }
+
+    // Log dans l'historique
+    addEntry(editingReport.id, HISTORY_ACTIONS.UPDATE, userData?.id, userData?.displayName, {
+      description: 'Mise à jour surface/budget/niveau'
+    });
   };
 
   const handleStatusChange = async (reportId, newStatus) => {
@@ -293,8 +322,10 @@ const ManagerPanel = () => {
             {[
               { id: 'dashboard', label: 'Dashboard', icon: BarChart3 },
               { id: 'reports', label: 'Signalements', icon: MapPin },
+              { id: 'delays', label: 'Délais', icon: Clock },
               { id: 'entreprises', label: 'Entreprises', icon: Building2 },
               { id: 'users', label: 'Utilisateurs', icon: Users },
+              { id: 'settings', label: 'Paramètres', icon: Settings },
               { id: 'history', label: 'Historique', icon: History },
               { id: 'validation', label: 'Validation', icon: CheckCircle }
             ].map(tab => (
@@ -397,6 +428,31 @@ const ManagerPanel = () => {
                         </div>
 
                         <div className="grid grid-cols-2 gap-3">
+                          {/* Niveau de dégradation */}
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-600 mb-1">
+                              Niveau (1-10)
+                            </label>
+                            <select
+                              value={editingReport.niveau}
+                              onChange={(e) => {
+                                const newNiveau = parseInt(e.target.value);
+                                setEditingReport({
+                                  ...editingReport,
+                                  niveau: newNiveau
+                                });
+                                calculateBudget(newNiveau, editingReport.surface);
+                              }}
+                              className="input-field text-sm"
+                            >
+                              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => (
+                                <option key={n} value={n}>
+                                  {n} - {n <= 3 ? 'Léger' : n <= 6 ? 'Modéré' : n <= 8 ? 'Sévère' : 'Critique'}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
                           <div>
                             <label className="block text-xs font-semibold text-slate-600 mb-1">
                               Surface (m²)
@@ -404,10 +460,14 @@ const ManagerPanel = () => {
                             <input
                               type="number"
                               value={editingReport.surface}
-                              onChange={(e) => setEditingReport({
-                                ...editingReport,
-                                surface: e.target.value
-                              })}
+                              onChange={(e) => {
+                                const newSurface = e.target.value;
+                                setEditingReport({
+                                  ...editingReport,
+                                  surface: newSurface
+                                });
+                                calculateBudget(editingReport.niveau, newSurface);
+                              }}
                               className="input-field text-sm"
                               placeholder="0.00"
                             />
@@ -415,18 +475,18 @@ const ManagerPanel = () => {
 
                           <div>
                             <label className="block text-xs font-semibold text-slate-600 mb-1">
-                              Budget (MGA)
+                              Budget calculé (MGA)
                             </label>
                             <input
                               type="number"
                               value={editingReport.budget}
-                              onChange={(e) => setEditingReport({
-                                ...editingReport,
-                                budget: e.target.value
-                              })}
-                              className="input-field text-sm"
-                              placeholder="0"
+                              readOnly
+                              className="input-field text-sm bg-gray-100 font-bold text-green-700"
+                              placeholder="Automatique"
                             />
+                            <p className="text-xs text-gray-400 mt-1">
+                              Prix/m² × Niveau × Surface
+                            </p>
                           </div>
 
                           <div>
@@ -505,6 +565,21 @@ const ManagerPanel = () => {
                             </span>
                           </div>
                           <div>
+                            <span className="text-slate-600">Niveau:</span>
+                            <span className={`ml-2 font-bold ${
+                              (report.niveau || 1) <= 3 ? 'text-green-600' :
+                              (report.niveau || 1) <= 6 ? 'text-yellow-600' :
+                              (report.niveau || 1) <= 8 ? 'text-orange-600' : 'text-red-600'
+                            }`}>
+                              {report.niveau || 1}/10
+                              <span className="font-normal text-xs ml-1">
+                                ({(report.niveau || 1) <= 3 ? 'Léger' : 
+                                  (report.niveau || 1) <= 6 ? 'Modéré' : 
+                                  (report.niveau || 1) <= 8 ? 'Sévère' : 'Critique'})
+                              </span>
+                            </span>
+                          </div>
+                          <div>
                             <span className="text-slate-600">Surface:</span>
                             <span className="ml-2 font-medium text-slate-800">
                               {report.surface ? `${report.surface} m²` : 'N/A'}
@@ -522,6 +597,62 @@ const ManagerPanel = () => {
                               {ENTREPRISES.find(e => e.id === report.entreprise_id)?.name || report.entreprise || 'Non assignée'}
                             </span>
                           </div>
+                        </div>
+
+                        {/* Délais et dates */}
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs bg-slate-50 p-3 rounded-lg">
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-3 w-3 text-blue-500" />
+                            <span className="text-slate-500">Créé:</span>
+                            <span className="font-medium text-slate-700">
+                              {report.created_at ? new Date(report.created_at).toLocaleDateString('fr-FR') : 'N/A'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-3 w-3 text-indigo-500" />
+                            <span className="text-slate-500">Assigné:</span>
+                            <span className="font-medium text-slate-700">
+                              {report.assigned_at ? new Date(report.assigned_at).toLocaleDateString('fr-FR') : 'En attente'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-3 w-3 text-orange-500" />
+                            <span className="text-slate-500">Démarré:</span>
+                            <span className="font-medium text-slate-700">
+                              {report.started_at ? new Date(report.started_at).toLocaleDateString('fr-FR') : 'Non démarré'}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Clock className="h-3 w-3 text-emerald-500" />
+                            <span className="text-slate-500">Terminé:</span>
+                            <span className="font-medium text-slate-700">
+                              {report.completed_at ? new Date(report.completed_at).toLocaleDateString('fr-FR') : 'En cours'}
+                            </span>
+                          </div>
+                          
+                          {/* Délai de démarrage (création -> démarrage) */}
+                          {report.started_at && report.created_at && (
+                            <div className="col-span-2 mt-1 pt-2 border-t border-slate-200">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-500">⏱️ Délai de démarrage:</span>
+                                <span className="font-bold text-blue-600">
+                                  {Math.round((new Date(report.started_at) - new Date(report.created_at)) / (1000 * 60 * 60 * 24))} jours
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                          
+                          {/* Durée des travaux (démarrage -> fin) */}
+                          {report.completed_at && report.started_at && (
+                            <div className="col-span-2 mt-1 pt-2 border-t border-slate-200">
+                              <div className="flex items-center justify-between">
+                                <span className="text-slate-500">🔧 Durée des travaux:</span>
+                                <span className="font-bold text-emerald-600">
+                                  {Math.round((new Date(report.completed_at) - new Date(report.started_at)) / (1000 * 60 * 60 * 24))} jours
+                                </span>
+                              </div>
+                            </div>
+                          )}
                         </div>
 
                         {/* Localisation - Quartier */}
@@ -663,6 +794,18 @@ const ManagerPanel = () => {
           </>
         )}
 
+        {/* Onglet Délais et Statistiques */}
+        {activeTab === 'delays' && (
+          <DelayStats />
+        )}
+
+        {/* Onglet Paramètres */}
+        {activeTab === 'settings' && (
+          <div className="space-y-6">
+            <PriceSettings userId={userData?.id} />
+          </div>
+        )}
+
         {/* Onglet Entreprises */}
         {activeTab === 'entreprises' && (
           <EntrepriseManager reports={allReports} />
@@ -684,36 +827,115 @@ const ManagerPanel = () => {
             
             {/* Liste des signalements avec problèmes */}
             <div className="card">
-              <h3 className="font-bold text-slate-800 mb-4">Signalements nécessitant attention</h3>
-              <div className="space-y-3">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5 text-amber-500" />
+                  Signalements nécessitant attention
+                </h3>
+                <span className="text-sm text-slate-500">
+                  {validationReport?.results.filter(r => !r.isValid || r.warnings.length > 0).length || 0} signalement(s)
+                </span>
+              </div>
+              
+              <div className="space-y-3 max-h-[500px] overflow-y-auto">
                 {validationReport?.results
                   .filter(r => !r.isValid || r.warnings.length > 0)
                   .slice(0, 20)
                   .map(result => {
                     const report = allReports.find(r => r.id === result.id);
                     return (
-                      <div key={result.id} className="p-4 bg-slate-50 rounded-lg border border-slate-200">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-medium text-slate-800">
-                            #{String(result.id || '').slice(0, 8)} - {report?.type || 'N/A'}
-                          </span>
-                          <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                            result.isValid ? 'bg-amber-100 text-amber-700' : 'bg-red-100 text-red-700'
-                          }`}>
-                            {result.completeness}% complet
-                          </span>
+                      <div key={result.id} className="p-4 bg-gradient-to-r from-slate-50 to-white rounded-xl border border-slate-200 hover:shadow-md transition-shadow">
+                        <div className="flex items-start justify-between mb-3">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                              result.isValid ? 'bg-amber-100' : 'bg-red-100'
+                            }`}>
+                              <AlertTriangle className={`h-5 w-5 ${
+                                result.isValid ? 'text-amber-600' : 'text-red-600'
+                              }`} />
+                            </div>
+                            <div>
+                              <span className="font-bold text-slate-800 block">
+                                #{String(result.id || '').slice(0, 8)}
+                              </span>
+                              <span className="text-sm text-slate-500">
+                                {report?.type || 'N/A'} • {report?.quartier || 'Quartier non défini'}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex flex-col items-end gap-1">
+                            <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                              result.completeness >= 80 ? 'bg-green-100 text-green-700' :
+                              result.completeness >= 50 ? 'bg-amber-100 text-amber-700' :
+                              'bg-red-100 text-red-700'
+                            }`}>
+                              {result.completeness}% complet
+                            </span>
+                            {report?.niveau && (
+                              <span className={`text-xs font-medium ${
+                                report.niveau <= 3 ? 'text-green-600' :
+                                report.niveau <= 6 ? 'text-yellow-600' :
+                                report.niveau <= 8 ? 'text-orange-600' : 'text-red-600'
+                              }`}>
+                                Niveau {report.niveau}/10
+                              </span>
+                            )}
+                          </div>
                         </div>
-                        <div className="space-y-1">
-                          {result.errors.map((e, i) => (
-                            <p key={i} className="text-sm text-red-600">❌ {e.message}</p>
-                          ))}
-                          {result.warnings.slice(0, 3).map((w, i) => (
-                            <p key={i} className="text-sm text-amber-600">⚠️ {w.message}</p>
-                          ))}
+                        
+                        {/* Erreurs */}
+                        {result.errors.length > 0 && (
+                          <div className="mb-2 p-2 bg-red-50 rounded-lg border border-red-100">
+                            <p className="text-xs font-semibold text-red-700 mb-1">Erreurs ({result.errors.length})</p>
+                            {result.errors.map((e, i) => (
+                              <p key={i} className="text-sm text-red-600 flex items-center gap-1">
+                                <X className="h-3 w-3" /> {e.message}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {/* Avertissements */}
+                        {result.warnings.length > 0 && (
+                          <div className="p-2 bg-amber-50 rounded-lg border border-amber-100">
+                            <p className="text-xs font-semibold text-amber-700 mb-1">Avertissements ({result.warnings.length})</p>
+                            {result.warnings.slice(0, 3).map((w, i) => (
+                              <p key={i} className="text-sm text-amber-600 flex items-center gap-1">
+                                <AlertTriangle className="h-3 w-3" /> {w.message}
+                              </p>
+                            ))}
+                            {result.warnings.length > 3 && (
+                              <p className="text-xs text-amber-500 mt-1">
+                                +{result.warnings.length - 3} autre(s) avertissement(s)
+                              </p>
+                            )}
+                          </div>
+                        )}
+                        
+                        {/* Bouton d'action */}
+                        <div className="mt-3 flex justify-end">
+                          <button
+                            onClick={() => {
+                              setActiveTab('reports');
+                              handleEditReport(report);
+                            }}
+                            className="text-xs px-3 py-1.5 bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 transition-colors flex items-center gap-1"
+                          >
+                            <Edit className="h-3 w-3" />
+                            Corriger
+                          </button>
                         </div>
                       </div>
                     );
                   })}
+                
+                {validationReport?.results.filter(r => !r.isValid || r.warnings.length > 0).length === 0 && (
+                  <div className="text-center py-8">
+                    <CheckCircle className="h-12 w-12 text-emerald-400 mx-auto mb-3" />
+                    <p className="text-slate-600 font-medium">Tous les signalements sont complets !</p>
+                    <p className="text-sm text-slate-500">Aucune action requise</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
