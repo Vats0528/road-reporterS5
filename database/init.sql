@@ -34,8 +34,13 @@ CREATE TABLE IF NOT EXISTS road_reports (
     entreprise_id VARCHAR(128),
     images JSONB DEFAULT '[]',
     status_history JSONB DEFAULT '[]',
+    niveau INTEGER DEFAULT 1 CHECK (niveau >= 1 AND niveau <= 10),
+    budget DECIMAL(15, 2),
+    surface DECIMAL(10, 2),
+    assigned_at TIMESTAMP,
     started_at TIMESTAMP,
     completed_at TIMESTAMP,
+    validated_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     synced_at TIMESTAMP,
@@ -57,6 +62,20 @@ CREATE TABLE IF NOT EXISTS entreprises (
     synced_at TIMESTAMP,
     is_synced BOOLEAN DEFAULT FALSE
 );
+
+-- Table de configuration (backoffice)
+CREATE TABLE IF NOT EXISTS settings (
+    id VARCHAR(50) PRIMARY KEY,
+    value JSONB NOT NULL,
+    description TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_by VARCHAR(128)
+);
+
+-- Valeurs par défaut
+INSERT INTO settings (id, value, description) 
+VALUES ('prix_m2', '{"amount": 50000, "currency": "MGA"}', 'Prix forfaitaire par m² pour le calcul du budget')
+ON CONFLICT (id) DO NOTHING;
 
 -- Table de synchronisation (log des opérations)
 CREATE TABLE IF NOT EXISTS sync_log (
