@@ -7,6 +7,18 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
+// Firebase Admin SDK pour l'upload vers Firebase Storage
+const admin = require('firebase-admin');
+const serviceAccount = require('./firebase-admin-key.json');
+
+// Initialiser Firebase Admin
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  storageBucket: 'routes-antananarivo.firebasestorage.app'
+});
+
+const bucket = admin.storage().bucket();
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
@@ -90,9 +102,9 @@ const pool = new Pool({
 // Test connexion
 pool.connect((err, client, release) => {
   if (err) {
-    console.error('❌ Erreur connexion PostgreSQL:', err.message);
+    console.error('[ERROR] Erreur connexion PostgreSQL:', err.message);
   } else {
-    console.log('✅ Connecté à PostgreSQL');
+    console.log('[OK] Connecté à PostgreSQL');
     release();
   }
 });
@@ -207,7 +219,7 @@ app.post('/api/reports', async (req, res) => {
 // PUT mettre à jour un signalement (surface, budget, entreprise, etc.)
 app.put('/api/reports/:id', async (req, res) => {
   try {
-    const { type, description, quartier, arrondissement, images, surface, budget, entreprise, status } = req.body;
+    const { type, description, quartier, arrondissement, images, surface, budget, entreprise, status, firebase_id } = req.body;
     
     const result = await pool.query(
       `UPDATE road_reports 
@@ -220,20 +232,21 @@ app.put('/api/reports/:id', async (req, res) => {
            budget = COALESCE($7, budget),
            entreprise_id = COALESCE($8, entreprise_id),
            status = COALESCE($9, status),
+           firebase_id = COALESCE($10, firebase_id),
            is_synced = FALSE,
            updated_at = NOW()
-       WHERE id = $10
+       WHERE id = $11
        RETURNING *`,
       [type, description, quartier, arrondissement, 
        images ? JSON.stringify(images) : null, 
-       surface, budget, entreprise, status, req.params.id]
+       surface, budget, entreprise, status, firebase_id, req.params.id]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Non trouvé' });
     }
 
-    console.log(`✏️ Signalement modifié: ${req.params.id}`);
+    console.log(`[INFO] Signalement modifié: ${req.params.id}`);
 
     // Log pour sync
     await pool.query(
@@ -321,7 +334,7 @@ app.put('/api/reports/:id/status', async (req, res) => {
       [normalizedStatus, JSON.stringify(statusHistory), isEnCours, isTermine, now, req.params.id]
     );
 
-    console.log(`✏️ Statut mis à jour: ${req.params.id} → ${normalizedStatus}`);
+    console.log(`[INFO] Statut mis à jour: ${req.params.id}  ->  ${normalizedStatus}`);
 
     // Log pour sync
     await pool.query(
@@ -431,7 +444,7 @@ app.delete('/api/users/:id', async (req, res) => {
       return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
     }
     
-    console.log(`🗑️ Utilisateur supprimé: ${req.params.id}`);
+    console.log(`[DELETE] Utilisateur supprimé: ${req.params.id}`);
     res.json({ success: true, error: null });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -470,7 +483,7 @@ app.post('/api/auth/register', async (req, res) => {
     );
 
     const user = result.rows[0];
-    console.log(`✅ Utilisateur créé localement: ${email} (${role})`);
+    console.log(`[OK] Utilisateur créé localement: ${email} (${role})`);
 
     res.status(201).json({
       success: true,
@@ -484,7 +497,7 @@ app.post('/api/auth/register', async (req, res) => {
       error: null
     });
   } catch (error) {
-    console.error('❌ Erreur inscription:', error);
+    console.error('[ERROR] Erreur inscription:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -529,7 +542,7 @@ app.post('/api/auth/login', async (req, res) => {
       [token, user.id]
     );
 
-    console.log(`✅ Connexion locale: ${email}`);
+    console.log(`[OK] Connexion locale: ${email}`);
 
     res.json({
       success: true,
@@ -543,7 +556,7 @@ app.post('/api/auth/login', async (req, res) => {
       error: null
     });
   } catch (error) {
-    console.error('❌ Erreur connexion:', error);
+    console.error('[ERROR] Erreur connexion:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -631,10 +644,10 @@ app.post('/api/auth/change-password', async (req, res) => {
       [hash, salt, userId]
     );
 
-    console.log(`🔐 Mot de passe changé pour: ${userId}`);
+    console.log(`[AUTH] Mot de passe changé pour: ${userId}`);
     res.json({ success: true, error: null });
   } catch (error) {
-    console.error('❌ Erreur changement mot de passe:', error);
+    console.error('[ERROR] Erreur changement mot de passe:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -708,31 +721,59 @@ app.post('/api/sync/mark-synced', async (req, res) => {
 app.post('/api/sync/import', async (req, res) => {
   try {
     const { reports = [], users = [], entreprises = [] } = req.body;
-    let importedReports = 0;
     let importedUsers = 0;
+    let skippedUsers = 0;
+    let importedReports = 0;
+    let skippedReports = 0;
+    let importedEntreprises = 0;
+    let skippedEntreprises = 0;
     const errors = [];
 
-    console.log(`📥 Import: ${reports.length} signalements, ${users.length} utilisateurs, ${entreprises.length} entreprises`);
+    console.log('[SYNC-IMPORT] Debut import: ' + reports.length + ' signalements, ' + users.length + ' utilisateurs, ' + entreprises.length + ' entreprises');
 
     // Importer les utilisateurs
     for (const user of users) {
       try {
-        await pool.query(
-          `INSERT INTO users (id, email, display_name, role, created_at, is_synced, synced_at)
-           VALUES ($1, $2, $3, $4, $5, TRUE, NOW())
-           ON CONFLICT (id) DO UPDATE SET 
-             email = EXCLUDED.email,
-             display_name = EXCLUDED.display_name,
-             role = EXCLUDED.role,
-             is_synced = TRUE,
-             synced_at = NOW()`,
-          [user.uid || user.id, user.email, user.displayName, user.role, 
-           user.createdAt || new Date()]
+        const userId = user.uid || user.id;
+        
+        // Verifier si l'utilisateur existe deja (par ID ou email)
+        const existing = await pool.query(
+          'SELECT id, email FROM users WHERE id = $1 OR email = $2',
+          [userId, user.email]
         );
-        importedUsers++;
+        
+        if (existing.rows.length > 0) {
+          // Utilisateur existe deja - mettre a jour seulement si c'est le meme ID
+          if (existing.rows[0].id === userId) {
+            await pool.query(
+              `UPDATE users SET 
+                 display_name = COALESCE($1, display_name),
+                 role = COALESCE($2, role),
+                 is_synced = TRUE,
+                 synced_at = NOW()
+               WHERE id = $3`,
+              [user.displayName, user.role, userId]
+            );
+            importedUsers++;
+            console.log('[SYNC-IMPORT] Utilisateur mis a jour: ' + user.email);
+          } else {
+            // Email existe avec un autre ID - ignorer
+            skippedUsers++;
+            console.log('[SYNC-IMPORT] Utilisateur ignore (email existe): ' + user.email);
+          }
+        } else {
+          // Nouvel utilisateur
+          await pool.query(
+            `INSERT INTO users (id, email, display_name, role, created_at, is_synced, synced_at)
+             VALUES ($1, $2, $3, $4, $5, TRUE, NOW())`,
+            [userId, user.email, user.displayName, user.role, user.createdAt || new Date()]
+          );
+          importedUsers++;
+          console.log('[SYNC-IMPORT] Utilisateur cree: ' + user.email);
+        }
       } catch (err) {
-        console.error('Erreur import user:', err.message);
-        errors.push({ type: 'user', id: user.id, error: err.message });
+        console.error('[SYNC-IMPORT] Erreur import user ' + user.email + ':', err.message);
+        errors.push({ type: 'user', id: user.id, email: user.email, error: err.message });
       }
     }
 
@@ -749,13 +790,13 @@ app.post('/api/sync/import', async (req, res) => {
           createdAt = new Date();
         }
 
-        // Vérifier si ce signalement existe déjà (par firebase_id ou localId)
+        // Verifier si ce signalement existe deja (par firebase_id ou id)
         const existingByFirebaseId = await pool.query(
           'SELECT id FROM road_reports WHERE firebase_id = $1 OR id = $1',
           [report.id]
         );
         
-        // Vérifier aussi par localId si présent
+        // Verifier aussi par localId si present
         let existingByLocalId = { rows: [] };
         if (report.localId) {
           existingByLocalId = await pool.query(
@@ -765,7 +806,7 @@ app.post('/api/sync/import', async (req, res) => {
         }
 
         if (existingByFirebaseId.rows.length > 0) {
-          // Mettre à jour l'existant
+          // Mettre a jour l'existant
           await pool.query(
             `UPDATE road_reports SET
                status = $1,
@@ -778,9 +819,10 @@ app.post('/api/sync/import', async (req, res) => {
             [report.status, JSON.stringify(report.images || []), 
              JSON.stringify(report.statusHistory || []), report.id]
           );
-          console.log(`  ✓ Mis à jour: ${report.id} (existait déjà)`);
+          skippedReports++;
+          console.log('[SYNC-IMPORT] Signalement mis a jour: ' + report.id);
         } else if (existingByLocalId.rows.length > 0) {
-          // Mettre à jour par localId et ajouter firebase_id
+          // Mettre a jour par localId et ajouter firebase_id
           await pool.query(
             `UPDATE road_reports SET
                status = $1,
@@ -793,9 +835,10 @@ app.post('/api/sync/import', async (req, res) => {
             [report.status, JSON.stringify(report.images || []), 
              JSON.stringify(report.statusHistory || []), report.id, report.localId]
           );
-          console.log(`  ✓ Lié Firebase: ${report.localId} → ${report.id}`);
+          skippedReports++;
+          console.log('[SYNC-IMPORT] Signalement lie: ' + report.localId + ' -> ' + report.id);
         } else if (!report.syncedFromLocal) {
-          // Nouveau signalement venant de Firebase (pas créé localement)
+          // Nouveau signalement venant de Firebase (pas cree localement)
           await pool.query(
             `INSERT INTO road_reports 
              (id, user_id, user_email, type, description, latitude, longitude,
@@ -819,53 +862,74 @@ app.post('/api/sync/import', async (req, res) => {
               createdAt
             ]
           );
-          console.log(`  ✓ Importé: ${report.id} (${report.type})`);
+          importedReports++;
+          console.log('[SYNC-IMPORT] Signalement importe: ' + report.id + ' (' + report.type + ')');
         } else {
-          console.log(`  ⏭️ Ignoré: ${report.id} (synchronisé depuis local)`);
+          skippedReports++;
+          console.log('[SYNC-IMPORT] Signalement ignore (syncedFromLocal): ' + report.id);
         }
-        importedReports++;
       } catch (err) {
-        console.error(`  ✗ Erreur import report ${report.id}:`, err.message);
+        console.error('[SYNC-IMPORT] Erreur import report ' + report.id + ':', err.message);
         errors.push({ type: 'report', id: report.id, error: err.message });
       }
     }
 
     // Importer les entreprises
-    let importedEntreprises = 0;
     for (const entreprise of entreprises) {
       try {
-        await pool.query(
-          `INSERT INTO entreprises (id, name, contact, phone, email, address, specialties, is_synced, synced_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, NOW())
-           ON CONFLICT (id) DO UPDATE SET 
-             name = EXCLUDED.name,
-             contact = EXCLUDED.contact,
-             phone = EXCLUDED.phone,
-             email = EXCLUDED.email,
-             address = EXCLUDED.address,
-             specialties = EXCLUDED.specialties,
-             is_synced = TRUE,
-             synced_at = NOW()`,
-          [entreprise.id, entreprise.name, entreprise.contact, entreprise.phone, 
-           entreprise.email, entreprise.address, JSON.stringify(entreprise.specialties || [])]
+        // Verifier si l'entreprise existe deja
+        const existing = await pool.query(
+          'SELECT id FROM entreprises WHERE id = $1',
+          [entreprise.id]
         );
-        importedEntreprises++;
-        console.log(`  ✓ Entreprise importée: ${entreprise.name}`);
+        
+        if (existing.rows.length > 0) {
+          // Mettre a jour
+          await pool.query(
+            `UPDATE entreprises SET
+               name = COALESCE($1, name),
+               contact = COALESCE($2, contact),
+               phone = COALESCE($3, phone),
+               email = COALESCE($4, email),
+               address = COALESCE($5, address),
+               specialties = COALESCE($6, specialties),
+               is_synced = TRUE,
+               synced_at = NOW()
+             WHERE id = $7`,
+            [entreprise.name, entreprise.contact, entreprise.phone, 
+             entreprise.email, entreprise.address, 
+             JSON.stringify(entreprise.specialties || []), entreprise.id]
+          );
+          skippedEntreprises++;
+          console.log('[SYNC-IMPORT] Entreprise mise a jour: ' + entreprise.name);
+        } else {
+          await pool.query(
+            `INSERT INTO entreprises (id, name, contact, phone, email, address, specialties, is_synced, synced_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, NOW())`,
+            [entreprise.id, entreprise.name, entreprise.contact, entreprise.phone, 
+             entreprise.email, entreprise.address, JSON.stringify(entreprise.specialties || [])]
+          );
+          importedEntreprises++;
+          console.log('[SYNC-IMPORT] Entreprise creee: ' + entreprise.name);
+        }
       } catch (err) {
-        console.error(`  ✗ Erreur import entreprise ${entreprise.id}:`, err.message);
+        console.error('[SYNC-IMPORT] Erreur import entreprise ' + entreprise.id + ':', err.message);
         errors.push({ type: 'entreprise', id: entreprise.id, error: err.message });
       }
     }
 
-    console.log(`✅ Import terminé: ${importedReports} signalements, ${importedUsers} utilisateurs, ${importedEntreprises} entreprises`);
+    console.log('[SYNC-IMPORT] Termine - Utilisateurs: ' + importedUsers + ' importes, ' + skippedUsers + ' ignores');
+    console.log('[SYNC-IMPORT] Termine - Signalements: ' + importedReports + ' importes, ' + skippedReports + ' ignores');
+    console.log('[SYNC-IMPORT] Termine - Entreprises: ' + importedEntreprises + ' importees, ' + skippedEntreprises + ' ignorees');
 
     res.json({ 
       success: true, 
       imported: { reports: importedReports, users: importedUsers, entreprises: importedEntreprises },
+      skipped: { reports: skippedReports, users: skippedUsers, entreprises: skippedEntreprises },
       errors: errors.length > 0 ? errors : undefined
     });
   } catch (error) {
-    console.error('❌ Erreur import:', error);
+    console.error('[SYNC-IMPORT] Erreur generale:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -882,7 +946,7 @@ app.get('/api/entreprises', async (req, res) => {
     );
     res.json({ entreprises: result.rows });
   } catch (error) {
-    console.error('❌ Erreur récupération entreprises:', error);
+    console.error('[ERROR] Erreur récupération entreprises:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -916,10 +980,10 @@ app.post('/api/entreprises', async (req, res) => {
       [entrepriseId, name, contact, phone, email, address, JSON.stringify(specialties || [])]
     );
     
-    console.log(`✅ Entreprise créée: ${name} (${entrepriseId})`);
+    console.log(`[OK] Entreprise créée: ${name} (${entrepriseId})`);
     res.status(201).json({ entreprise: result.rows[0] });
   } catch (error) {
-    console.error('❌ Erreur création entreprise:', error);
+    console.error('[ERROR] Erreur création entreprise:', error);
     res.status(500).json({ error: error.message });
   }
 });
@@ -1047,6 +1111,132 @@ app.post('/api/upload-single/:reportId?', upload.single('image'), async (req, re
   }
 });
 
+// ============================================================================
+// MIGRATION IMAGES VERS FIREBASE STORAGE
+// ============================================================================
+
+// Migrer une image locale vers Firebase Storage
+app.post('/api/migrate-image-to-firebase', async (req, res) => {
+  try {
+    const { localUrl, reportId } = req.body;
+    
+    if (!localUrl || !reportId) {
+      return res.status(400).json({ error: 'localUrl et reportId requis' });
+    }
+
+    // Extraire le chemin du fichier depuis l'URL locale
+    // URL format: http://localhost:3001/uploads/{reportId}/{filename}
+    const urlPath = localUrl.replace(`http://localhost:${PORT}/`, '');
+    const localFilePath = path.join(__dirname, urlPath);
+
+    // Vérifier que le fichier existe
+    if (!fs.existsSync(localFilePath)) {
+      return res.status(404).json({ error: 'Fichier local non trouvé', path: localFilePath });
+    }
+
+    // Générer un nom unique pour Firebase
+    const timestamp = Date.now();
+    const randomStr = Math.random().toString(36).substring(2, 8);
+    const extension = path.extname(localFilePath);
+    const firebaseFileName = `report_images/${reportId}/${reportId}_${timestamp}_${randomStr}${extension}`;
+
+    // Upload vers Firebase Storage
+    await bucket.upload(localFilePath, {
+      destination: firebaseFileName,
+      metadata: {
+        contentType: `image/${extension.replace('.', '') || 'jpeg'}`,
+        metadata: {
+          originalLocalUrl: localUrl,
+          reportId: reportId,
+          uploadedAt: new Date().toISOString()
+        }
+      }
+    });
+
+    // Rendre le fichier public et obtenir l'URL
+    const file = bucket.file(firebaseFileName);
+    await file.makePublic();
+    
+    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${firebaseFileName}`;
+    
+    console.log(`[OK] Image migrée vers Firebase: ${firebaseFileName}`);
+
+    res.json({
+      success: true,
+      firebaseUrl: publicUrl,
+      firebasePath: firebaseFileName,
+      originalUrl: localUrl
+    });
+  } catch (error) {
+    console.error('[ERROR] Migration image vers Firebase:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Migrer toutes les images d'un signalement
+app.post('/api/migrate-report-images/:reportId', async (req, res) => {
+  try {
+    const { reportId } = req.params;
+    const reportDir = path.join(UPLOADS_DIR, reportId);
+
+    if (!fs.existsSync(reportDir)) {
+      return res.json({ success: true, migrated: [], message: 'Aucune image à migrer' });
+    }
+
+    const files = fs.readdirSync(reportDir);
+    const results = [];
+
+    for (const filename of files) {
+      const localFilePath = path.join(reportDir, filename);
+      const localUrl = `http://localhost:${PORT}/uploads/${reportId}/${filename}`;
+      
+      try {
+        const timestamp = Date.now();
+        const randomStr = Math.random().toString(36).substring(2, 8);
+        const extension = path.extname(filename);
+        const firebaseFileName = `report_images/${reportId}/${reportId}_${timestamp}_${randomStr}${extension}`;
+
+        await bucket.upload(localFilePath, {
+          destination: firebaseFileName,
+          metadata: {
+            contentType: `image/${extension.replace('.', '') || 'jpeg'}`
+          }
+        });
+
+        const file = bucket.file(firebaseFileName);
+        await file.makePublic();
+        
+        const publicUrl = `https://storage.googleapis.com/${bucket.name}/${firebaseFileName}`;
+        
+        results.push({
+          originalUrl: localUrl,
+          firebaseUrl: publicUrl,
+          success: true
+        });
+        
+        console.log(`   [OK] Migré: ${filename}`);
+      } catch (err) {
+        results.push({
+          originalUrl: localUrl,
+          error: err.message,
+          success: false
+        });
+        console.error(`   [ERROR] Echec: ${filename}`, err.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      reportId,
+      migrated: results,
+      count: results.filter(r => r.success).length
+    });
+  } catch (error) {
+    console.error('[ERROR] Migration images signalement:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // Supprimer une image
 app.delete('/api/upload/:reportId/:filename', async (req, res) => {
   try {
@@ -1085,6 +1275,249 @@ app.get('/api/upload/:reportId', async (req, res) => {
     res.json({ images });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ============================================================================
+// SETTINGS / CONFIGURATION BACKOFFICE
+// ============================================================================
+
+// GET - Récupérer tous les settings
+app.get('/api/settings', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM settings ORDER BY id');
+    res.json({ success: true, settings: result.rows });
+  } catch (error) {
+    console.error('Erreur GET /settings:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET - Récupérer un setting spécifique
+app.get('/api/settings/:id', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM settings WHERE id = $1', [req.params.id]);
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Setting non trouvé' });
+    }
+    res.json({ success: true, setting: result.rows[0] });
+  } catch (error) {
+    console.error('Erreur GET /settings/:id:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT - Mettre à jour un setting
+app.put('/api/settings/:id', async (req, res) => {
+  try {
+    const { value, updatedBy } = req.body;
+    const result = await pool.query(
+      `UPDATE settings SET value = $1, updated_at = NOW(), updated_by = $2 WHERE id = $3 RETURNING *`,
+      [JSON.stringify(value), updatedBy, req.params.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Setting non trouvé' });
+    }
+    console.log(`[OK] Setting mis à jour: ${req.params.id}`);
+    res.json({ success: true, setting: result.rows[0] });
+  } catch (error) {
+    console.error('Erreur PUT /settings/:id:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET - Calculer le budget automatiquement
+app.get('/api/calculate-budget', async (req, res) => {
+  try {
+    const { niveau, surface } = req.query;
+    
+    if (!niveau || !surface) {
+      return res.status(400).json({ success: false, error: 'niveau et surface requis' });
+    }
+    
+    // Récupérer le prix par m²
+    const settingResult = await pool.query('SELECT value FROM settings WHERE id = $1', ['prix_m2']);
+    if (settingResult.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Prix par m² non configuré' });
+    }
+    
+    const prixM2 = settingResult.rows[0].value.amount;
+    const niveauNum = parseInt(niveau);
+    const surfaceNum = parseFloat(surface);
+    
+    // Formule: prix_par_m2 * niveau * surface_m2
+    const budget = prixM2 * niveauNum * surfaceNum;
+    
+    res.json({ 
+      success: true, 
+      budget,
+      details: {
+        prixM2,
+        niveau: niveauNum,
+        surface: surfaceNum,
+        formule: `${prixM2} × ${niveauNum} × ${surfaceNum} = ${budget}`
+      }
+    });
+  } catch (error) {
+    console.error('Erreur GET /calculate-budget:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// GET - Statistiques avec délais de traitement
+app.get('/api/stats/delays', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        COUNT(*) as total,
+        COUNT(*) FILTER (WHERE status = 'termine') as completed,
+        COUNT(*) FILTER (WHERE status = 'en_cours') as in_progress,
+        COUNT(*) FILTER (WHERE status = 'nouveau') as new,
+        
+        -- Délai moyen création -> assignation (en jours)
+        ROUND((AVG(EXTRACT(EPOCH FROM (assigned_at - created_at)) / 86400) 
+          FILTER (WHERE assigned_at IS NOT NULL))::numeric, 1) as avg_days_to_assign,
+        
+        -- Délai moyen assignation -> démarrage (en jours)
+        ROUND((AVG(EXTRACT(EPOCH FROM (started_at - assigned_at)) / 86400) 
+          FILTER (WHERE started_at IS NOT NULL AND assigned_at IS NOT NULL))::numeric, 1) as avg_days_to_start,
+        
+        -- Délai moyen démarrage -> fin (en jours)
+        ROUND((AVG(EXTRACT(EPOCH FROM (completed_at - started_at)) / 86400) 
+          FILTER (WHERE completed_at IS NOT NULL AND started_at IS NOT NULL))::numeric, 1) as avg_days_to_complete,
+        
+        -- Délai moyen total création -> fin (en jours)
+        ROUND((AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 86400) 
+          FILTER (WHERE completed_at IS NOT NULL))::numeric, 1) as avg_total_days,
+        
+        -- Budget total et moyen
+        SUM(budget) as total_budget,
+        ROUND(AVG(budget)::numeric, 0) as avg_budget,
+        
+        -- Surface totale et moyenne
+        SUM(surface) as total_surface,
+        ROUND(AVG(surface)::numeric, 1) as avg_surface,
+        
+        -- Par niveau
+        ROUND(AVG(niveau)::numeric, 1) as avg_niveau
+        
+      FROM road_reports
+    `);
+    
+    // Statistiques par type de dégradation
+    const byType = await pool.query(`
+      SELECT 
+        type,
+        COUNT(*) as count,
+        ROUND(AVG(niveau)::numeric, 1) as avg_niveau,
+        SUM(surface) as total_surface,
+        SUM(budget) as total_budget,
+        ROUND((AVG(EXTRACT(EPOCH FROM (completed_at - created_at)) / 86400) 
+          FILTER (WHERE completed_at IS NOT NULL))::numeric, 1) as avg_days
+      FROM road_reports
+      GROUP BY type
+      ORDER BY count DESC
+    `);
+    
+    // Statistiques par entreprise
+    const byEntreprise = await pool.query(`
+      SELECT 
+        e.name as entreprise_name,
+        COUNT(r.id) as count,
+        SUM(r.surface) as total_surface,
+        SUM(r.budget) as total_budget,
+        ROUND((AVG(EXTRACT(EPOCH FROM (r.completed_at - r.started_at)) / 86400) 
+          FILTER (WHERE r.completed_at IS NOT NULL AND r.started_at IS NOT NULL))::numeric, 1) as avg_days_work
+      FROM road_reports r
+      LEFT JOIN entreprises e ON r.entreprise_id = e.id
+      WHERE r.entreprise_id IS NOT NULL
+      GROUP BY e.name
+      ORDER BY count DESC
+    `);
+    
+    res.json({ 
+      success: true, 
+      stats: result.rows[0],
+      byType: byType.rows,
+      byEntreprise: byEntreprise.rows
+    });
+  } catch (error) {
+    console.error('Erreur GET /stats/delays:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// PUT - Mettre à jour un signalement avec calcul automatique du budget
+app.put('/api/reports/:id/with-budget', async (req, res) => {
+  try {
+    const { niveau, surface, status, entreprise_id } = req.body;
+    
+    // Récupérer le prix par m²
+    const settingResult = await pool.query('SELECT value FROM settings WHERE id = $1', ['prix_m2']);
+    const prixM2 = settingResult.rows.length > 0 ? settingResult.rows[0].value.amount : 50000;
+    
+    // Calculer le budget
+    const niveauNum = parseInt(niveau) || 1;
+    const surfaceNum = parseFloat(surface) || 0;
+    const budget = prixM2 * niveauNum * surfaceNum;
+    
+    // Déterminer les timestamps selon le statut
+    let assignedAt = null;
+    let startedAt = null;
+    let completedAt = null;
+    
+    // Récupérer les valeurs actuelles
+    const current = await pool.query('SELECT * FROM road_reports WHERE id = $1', [req.params.id]);
+    if (current.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Signalement non trouvé' });
+    }
+    
+    const currentReport = current.rows[0];
+    
+    // Mettre à jour les dates selon le changement de statut
+    if (entreprise_id && !currentReport.assigned_at) {
+      assignedAt = new Date();
+    }
+    // Gérer les deux formats: en_cours et en-cours
+    if ((status === 'en_cours' || status === 'en-cours') && !currentReport.started_at) {
+      startedAt = new Date();
+    }
+    if ((status === 'termine' || status === 'terminé') && !currentReport.completed_at) {
+      completedAt = new Date();
+    }
+    
+    const result = await pool.query(
+      `UPDATE road_reports 
+       SET niveau = COALESCE($1, niveau),
+           surface = COALESCE($2, surface),
+           budget = $3,
+           status = COALESCE($4, status),
+           entreprise_id = COALESCE($5, entreprise_id),
+           assigned_at = COALESCE($6, assigned_at),
+           started_at = COALESCE($7, started_at),
+           completed_at = COALESCE($8, completed_at),
+           is_synced = FALSE,
+           updated_at = NOW()
+       WHERE id = $9
+       RETURNING *`,
+      [niveauNum, surfaceNum, budget, status, entreprise_id, assignedAt, startedAt, completedAt, req.params.id]
+    );
+    
+    console.log(`[OK] Signalement mis à jour avec budget: ${req.params.id} (Budget: ${budget} MGA)`);
+    
+    res.json({ 
+      success: true, 
+      report: result.rows[0],
+      budgetDetails: {
+        prixM2,
+        niveau: niveauNum,
+        surface: surfaceNum,
+        budget
+      }
+    });
+  } catch (error) {
+    console.error('Erreur PUT /reports/:id/with-budget:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

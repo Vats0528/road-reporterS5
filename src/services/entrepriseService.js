@@ -37,7 +37,7 @@ export const getAllEntreprisesFirebase = async () => {
       });
     });
     
-    console.log(`📋 ${entreprises.length} entreprises récupérées de Firebase`);
+    console.log(`[INFO] ${entreprises.length} entreprises récupérées de Firebase`);
     return { entreprises, error: null };
   } catch (error) {
     console.error('Erreur récupération entreprises Firebase:', error);
@@ -60,11 +60,11 @@ export const createEntrepriseFirebase = async (entrepriseData) => {
     if (entrepriseData.id) {
       const docRef = doc(db, ENTREPRISES_COLLECTION, entrepriseData.id);
       await setDoc(docRef, data);
-      console.log(`✅ Entreprise créée dans Firebase: ${entrepriseData.id}`);
+      console.log(`[OK] Entreprise créée dans Firebase: ${entrepriseData.id}`);
       return { id: entrepriseData.id, error: null };
     } else {
       const docRef = await addDoc(collection(db, ENTREPRISES_COLLECTION), data);
-      console.log(`✅ Entreprise créée dans Firebase: ${docRef.id}`);
+      console.log(`[OK] Entreprise créée dans Firebase: ${docRef.id}`);
       return { id: docRef.id, error: null };
     }
   } catch (error) {
@@ -83,7 +83,7 @@ export const updateEntrepriseFirebase = async (entrepriseId, updateData) => {
       ...updateData,
       updatedAt: serverTimestamp()
     });
-    console.log(`✅ Entreprise mise à jour dans Firebase: ${entrepriseId}`);
+    console.log(`[OK] Entreprise mise à jour dans Firebase: ${entrepriseId}`);
     return { success: true, error: null };
   } catch (error) {
     console.error('Erreur mise à jour entreprise Firebase:', error);
@@ -97,7 +97,7 @@ export const updateEntrepriseFirebase = async (entrepriseId, updateData) => {
 export const deleteEntrepriseFirebase = async (entrepriseId) => {
   try {
     await deleteDoc(doc(db, ENTREPRISES_COLLECTION, entrepriseId));
-    console.log(`✅ Entreprise supprimée de Firebase: ${entrepriseId}`);
+    console.log(`[OK] Entreprise supprimée de Firebase: ${entrepriseId}`);
     return { success: true, error: null };
   } catch (error) {
     console.error('Erreur suppression entreprise Firebase:', error);

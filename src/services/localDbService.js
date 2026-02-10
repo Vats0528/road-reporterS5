@@ -7,14 +7,19 @@
 import { 
   getAllReports as getFirebaseReports, 
   createReportDirect as createFirebaseReport,
-  updateReportStatus as updateFirebaseStatus
+  updateReportStatus as updateFirebaseStatus,
+  updateReport as updateFirebaseReport
 } from './reportService';
 import {
   createEntrepriseFirebase,
   getAllEntreprisesFirebase
 } from './entrepriseService';
+import { getAllUsers as getAllFirebaseUsers } from './authService';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from './firebase';
 
 const API_URL = 'http://localhost:3001/api';
+const USERS_COLLECTION = 'users';
 
 // ============================================================================
 // OPÉRATIONS CRUD (toujours via PostgreSQL local)
@@ -104,7 +109,7 @@ export const updateReportStatus = async (reportId, status, changedByRole, change
       body: JSON.stringify({ status, changedBy })
     });
     if (!response.ok) throw new Error('Erreur mise à jour statut');
-    console.log(`✏️ Statut mis à jour localement: ${reportId} → ${status}`);
+    console.log(`[INFO] Statut mis à jour localement: ${reportId} to ${status}`);
     return { success: true, error: null };
   } catch (error) {
     console.error('Erreur updateReportStatus local:', error);
@@ -210,6 +215,37 @@ export const getReportsStats = (reports = []) => {
 // ============================================================================
 
 /**
+ * Migre une image locale vers Firebase Storage via le backend
+ * @param {string} localUrl - URL locale de l'image (http://localhost:3001/...)
+ * @param {string} reportId - ID du rapport
+ * @returns {Promise<string|null>} URL Firebase ou null si echec
+ */
+const migrateImageToFirebase = async (localUrl, reportId) => {
+  try {
+    // Utiliser l'endpoint backend qui a Firebase Admin SDK
+    const response = await fetch(`${API_URL}/migrate-image-to-firebase`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ localUrl, reportId })
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      console.warn(`   [WARN] Migration echouee: ${error.error}`);
+      return null;
+    }
+    
+    const result = await response.json();
+    console.log(`   [OK] Image migrée: ${result.firebaseUrl}`);
+    
+    return result.firebaseUrl;
+  } catch (error) {
+    console.error(`   [ERROR] Migration image echouée:`, error.message);
+    return null;
+  }
+};
+
+/**
  * Vérifie si l'API locale est disponible
  */
 export const isLocalApiAvailable = async () => {
@@ -239,19 +275,50 @@ export const getPendingSyncCount = async () => {
  */
 export const syncToFirebase = async () => {
   try {
-    console.log('🔄 === DÉBUT SYNCHRONISATION LOCAL → FIREBASE ===');
+    console.log('[SYNC] === DÉBUT SYNCHRONISATION LOCAL to FIREBASE ===');
     
     // Récupérer les éléments non synchronisés
     const response = await fetch(`${API_URL}/sync/pending`);
     const pending = await response.json();
     
-    console.log(`📤 ${pending.reports?.length || 0} signalements à synchroniser`);
-    console.log(`🏢 ${pending.entreprises?.length || 0} entreprises à synchroniser`);
+    console.log(`[INFO] ${pending.users?.length || 0} utilisateurs à synchroniser`);
+    console.log(`[INFO] ${pending.reports?.length || 0} signalements à synchroniser`);
+    console.log(`[INFO] ${pending.entreprises?.length || 0} entreprises à synchroniser`);
     
     let created = 0;
     let updated = 0;
     let entreprisesSynced = 0;
+    let usersSynced = 0;
     const errors = [];
+
+    // ===== SYNCHRONISER LES UTILISATEURS =====
+    for (const user of pending.users || []) {
+      try {
+        const userData = {
+          uid: user.id,
+          email: user.email,
+          displayName: user.display_name,
+          role: user.role,
+          createdAt: user.created_at || new Date().toISOString(),
+          updatedAt: serverTimestamp(),
+          syncedFromLocal: true
+        };
+
+        console.log(`   [INFO] Sync utilisateur: ${user.email}`);
+        await setDoc(doc(db, USERS_COLLECTION, user.id), userData, { merge: true });
+        
+        await fetch(`${API_URL}/sync/mark-synced`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ table: 'users', ids: [user.id] })
+        });
+        usersSynced++;
+        console.log(`   [OK] Utilisateur synchronisé: ${user.email}`);
+      } catch (err) {
+        console.error(`   [ERROR] Erreur utilisateur: ${user.id}`, err.message);
+        errors.push({ id: user.id, type: 'user', error: err.message });
+      }
+    }
 
     // ===== SYNCHRONISER LES ENTREPRISES =====
     for (const entreprise of pending.entreprises || []) {
@@ -268,7 +335,7 @@ export const syncToFirebase = async () => {
             : (entreprise.specialties || [])
         };
 
-        console.log(`   🏢 Sync entreprise: ${entreprise.name}`);
+        console.log(`   [INFO] Sync entreprise: ${entreprise.name}`);
         const result = await createEntrepriseFirebase(firebaseData);
         
         if (result.id) {
@@ -282,7 +349,7 @@ export const syncToFirebase = async () => {
           errors.push({ id: entreprise.id, type: 'entreprise', error: result.error });
         }
       } catch (err) {
-        console.error(`   ❌ Erreur entreprise: ${entreprise.id}`, err.message);
+        console.error(`   [ERROR] Erreur entreprise: ${entreprise.id}`, err.message);
         errors.push({ id: entreprise.id, type: 'entreprise', error: err.message });
       }
     }
@@ -291,13 +358,71 @@ export const syncToFirebase = async () => {
     // Envoyer chaque signalement vers Firebase
     for (const report of pending.reports || []) {
       try {
-        // Vérifier si c'est un nouveau signalement ou une mise à jour
-        const hasFirebaseId = report.firebase_id && report.firebase_id !== report.id;
-        const isFirebaseId = report.id.match(/^[a-zA-Z0-9]{20}$/);
-        const isLocalCreation = !hasFirebaseId && !isFirebaseId;
-
-        if (isLocalCreation || !hasFirebaseId) {
-          // Nouveau signalement - créer dans Firebase
+        // Verifier si le signalement a deja un firebase_id (deja synchronise une fois)
+        const hasFirebaseId = report.firebase_id && report.firebase_id.length > 0;
+        
+        // Migrer les images locales vers Firebase Storage via le backend
+        let localImages = typeof report.images === 'string' ? JSON.parse(report.images || '[]') : (report.images || []);
+        let firebaseImages = [];
+        
+        for (const img of localImages) {
+          // Si c'est une URL locale (localhost), migrer vers Firebase Storage
+          if (img && img.url && img.url.includes('localhost:3001')) {
+            try {
+              console.log(`   [INFO] Migration image vers Firebase: ${img.url}`);
+              const firebaseUrl = await migrateImageToFirebase(img.url, report.id);
+              if (firebaseUrl) {
+                firebaseImages.push({ ...img, url: firebaseUrl, originalLocalUrl: img.url });
+              } else {
+                firebaseImages.push(img); // Garder l'original si echec
+              }
+            } catch (err) {
+              console.warn(`   [WARN] Echec migration image: ${err.message}`);
+              firebaseImages.push(img);
+            }
+          } else {
+            firebaseImages.push(img);
+          }
+        }
+        
+        if (hasFirebaseId) {
+          // Signalement existant dans Firebase - mettre a jour completement
+          const firebaseId = report.firebase_id;
+          console.log(`   [INFO] Mise a jour Firebase: ${firebaseId}`);
+          
+          const updateData = {
+            type: report.type,
+            description: report.description || '',
+            quartier: report.quartier || null,
+            arrondissement: report.arrondissement || null,
+            images: firebaseImages,
+            status: report.status || 'nouveau',
+            budget: report.budget ? parseFloat(report.budget) : null,
+            surface: report.surface ? parseFloat(report.surface) : null,
+            niveau: report.niveau || 1,
+            assignedAt: report.assigned_at || null,
+            startedAt: report.started_at || null,
+            completedAt: report.completed_at || null,
+            validatedAt: report.validated_at || null,
+            entrepriseId: report.entreprise_id || null
+          };
+          
+          const result = await updateFirebaseReport(firebaseId, updateData, 'manager');
+          
+          if (result.success) {
+            await fetch(`${API_URL}/sync/mark-synced`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ table: 'road_reports', ids: [report.id] })
+            });
+            updated++;
+            console.log(`   [OK] Mis a jour: ${report.id} (Firebase: ${firebaseId})`);
+          } else {
+            console.warn(`   [WARN] Erreur update Firebase: ${result.error}`);
+            errors.push({ id: report.id, error: result.error });
+          }
+        } else {
+          // Nouveau signalement - creer dans Firebase
           const firebaseData = {
             userId: report.user_id || null,
             userEmail: report.user_email || null,
@@ -307,17 +432,26 @@ export const syncToFirebase = async () => {
             longitude: parseFloat(report.longitude),
             quartier: report.quartier || null,
             arrondissement: report.arrondissement || null,
-            images: typeof report.images === 'string' ? JSON.parse(report.images || '[]') : (report.images || []),
+            images: firebaseImages,
             statusHistory: typeof report.status_history === 'string' ? JSON.parse(report.status_history || '[]') : (report.status_history || []),
             status: report.status || 'nouveau',
-            localId: report.id
+            budget: report.budget ? parseFloat(report.budget) : null,
+            surface: report.surface ? parseFloat(report.surface) : null,
+            niveau: report.niveau || 1,
+            assignedAt: report.assigned_at || null,
+            startedAt: report.started_at || null,
+            completedAt: report.completed_at || null,
+            validatedAt: report.validated_at || null,
+            entrepriseId: report.entreprise_id || null,
+            localId: report.id,
+            syncedFromLocal: true
           };
 
-          console.log(`   📝 Création Firebase: ${report.id} (${report.type})`);
+          console.log(`   [INFO] Creation Firebase: ${report.id} (${report.type})`);
           const result = await createFirebaseReport(firebaseData);
           
           if (result.id) {
-            // Mettre à jour l'ID Firebase dans la base locale
+            // Mettre a jour l'ID Firebase dans la base locale
             await fetch(`${API_URL}/reports/${report.id}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
@@ -330,93 +464,76 @@ export const syncToFirebase = async () => {
               body: JSON.stringify({ table: 'road_reports', ids: [report.id] })
             });
             created++;
-            console.log(`   ✅ Créé: ${report.id} → Firebase ID: ${result.id}`);
+            console.log(`   [OK] Cree: ${report.id} -> Firebase ID: ${result.id}`);
           } else {
-            console.error(`   ❌ Échec création: ${result.error}`);
+            console.error(`   [ERROR] Echec creation: ${result.error}`);
             errors.push({ id: report.id, type: 'report', error: result.error });
-          }
-        } else {
-          // Signalement existant - mettre à jour le statut dans Firebase
-          const firebaseId = report.firebase_id || report.id;
-          console.log(`   ✏️ Mise à jour statut: ${firebaseId} → ${report.status}`);
-          
-          const result = await updateFirebaseStatus(firebaseId, report.status, 'manager');
-          
-          if (result.success) {
-            await fetch(`${API_URL}/sync/mark-synced`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ table: 'road_reports', ids: [report.id] })
-            });
-            updated++;
-          } else {
-            console.warn(`   ⚠️ Erreur update Firebase: ${result.error}`);
-            errors.push({ id: report.id, error: result.error });
           }
         }
       } catch (err) {
-        console.error(`   ❌ Erreur: ${report.id}`, err.message);
+        console.error(`   [ERROR] Erreur: ${report.id}`, err.message);
         errors.push({ id: report.id, error: err.message });
       }
     }
 
-    console.log('✅ === SYNCHRONISATION LOCAL → FIREBASE TERMINÉE ===');
-    console.log(`   ✓ Signalements: ${created} créés, ${updated} mis à jour`);
-    console.log(`   ✓ Entreprises: ${entreprisesSynced} synchronisées`);
+    console.log('[OK] === SYNCHRONISATION LOCAL to FIREBASE TERMINÉE ===');
+    console.log(`   [OK] Utilisateurs: ${usersSynced} synchronisés`);
+    console.log(`   [OK] Signalements: ${created} créés, ${updated} mis à jour`);
+    console.log(`   [OK] Entreprises: ${entreprisesSynced} synchronisées`);
     if (errors.length > 0) {
-      console.warn(`   ⚠️ ${errors.length} erreurs`);
+      console.warn(`   [WARN] ${errors.length} erreurs`);
     }
 
     return { 
       success: true, 
       created, 
       updated, 
+      usersSynced,
       entreprisesSynced,
-      synced: created + updated + entreprisesSynced, 
+      synced: created + updated + entreprisesSynced + usersSynced, 
       errors 
     };
   } catch (error) {
-    console.error('❌ Exception syncToFirebase:', error);
+    console.error('[ERROR] Exception syncToFirebase:', error);
     return { success: false, error: error.message };
   }
 };
 
 /**
- * Importe les données de Firebase vers local (signalements + entreprises)
- * Note: Les utilisateurs sont gérés localement, pas de sync depuis Firebase
+ * Importe les données de Firebase vers local (signalements + entreprises + utilisateurs)
  */
 export const syncFromFirebase = async () => {
   try {
-    console.log('🔄 === DÉBUT SYNCHRONISATION FIREBASE → LOCAL ===');
+    console.log('[SYNC] === DÉBUT SYNCHRONISATION FIREBASE to LOCAL ===');
     
     // 1. Récupérer les SIGNALEMENTS de Firebase
-    console.log('📋 Récupération des signalements Firebase...');
+    console.log('[INFO] Récupération des signalements Firebase...');
     const { reports: firebaseReports, error: reportsError } = await getFirebaseReports();
     
     if (reportsError) {
-      console.error('❌ Erreur récupération reports:', reportsError);
+      console.error('[ERROR] Erreur récupération reports:', reportsError);
       return { success: false, error: reportsError };
     }
     
-    console.log(`📋 ${firebaseReports?.length || 0} signalements trouvés dans Firebase`);
+    console.log(`[INFO] ${firebaseReports?.length || 0} signalements trouvés dans Firebase`);
 
     // FILTRER les signalements qui ont été synchronisés depuis le local
     // pour éviter les doublons
     const reportsToImport = (firebaseReports || []).filter(report => {
       // Ignorer les signalements qui ont été créés depuis le local
       if (report.syncedFromLocal === true) {
-        console.log(`   ⏭️ Ignoré (syncedFromLocal): ${report.id}`);
+        console.log(`   [SKIP] Ignoré (syncedFromLocal): ${report.id}`);
         return false;
       }
       // Ignorer si le localId existe (c'est un signalement qu'on a envoyé)
       if (report.localId) {
-        console.log(`   ⏭️ Ignoré (a localId): ${report.id} → ${report.localId}`);
+        console.log(`   [SKIP] Ignoré (a localId): ${report.id} to ${report.localId}`);
         return false;
       }
       return true;
     });
 
-    console.log(`📋 ${reportsToImport.length} signalements à importer (après filtrage)`);
+    console.log(`[INFO] ${reportsToImport.length} signalements à importer (après filtrage)`);
 
     // Formater les signalements
     const formattedReports = reportsToImport.map(report => {
@@ -451,16 +568,16 @@ export const syncFromFirebase = async () => {
       };
     });
 
-    console.log('📤 Envoi vers PostgreSQL local...');
+    console.log('[INFO] Envoi vers PostgreSQL local...');
     console.log(`   - ${formattedReports.length} signalements`);
 
     // 2. Récupérer les ENTREPRISES de Firebase
-    console.log('🏢 Récupération des entreprises Firebase...');
+    console.log('[INFO] Récupération des entreprises Firebase...');
     let formattedEntreprises = [];
     try {
       const { entreprises: firebaseEntreprises, error: entreprisesError } = await getAllEntreprisesFirebase();
       if (!entreprisesError && firebaseEntreprises) {
-        console.log(`🏢 ${firebaseEntreprises.length} entreprises trouvées`);
+        console.log(`[INFO] ${firebaseEntreprises.length} entreprises trouvées`);
         formattedEntreprises = firebaseEntreprises.map(e => ({
           id: e.id,
           name: e.name,
@@ -471,40 +588,73 @@ export const syncFromFirebase = async () => {
           specialties: e.specialties || []
         }));
       } else if (entreprisesError) {
-        console.warn('⚠️ Erreur récupération entreprises:', entreprisesError);
+        console.warn('[WARN] Erreur récupération entreprises:', entreprisesError);
       }
     } catch (err) {
-      console.warn('⚠️ Erreur entreprises Firebase:', err.message);
+      console.warn('[WARN] Erreur entreprises Firebase:', err.message);
     }
 
     console.log(`   - ${formattedEntreprises.length} entreprises`);
 
-    // 3. Envoyer à l'API locale (sans users)
+    // 3. Récupérer les UTILISATEURS de Firebase
+    console.log('[INFO] Récupération des utilisateurs Firebase...');
+    let formattedUsers = [];
+    try {
+      const { users: firebaseUsers, error: usersError } = await getAllFirebaseUsers();
+      if (!usersError && firebaseUsers) {
+        // Filtrer les utilisateurs déjà synchronisés depuis le local
+        const usersToImport = firebaseUsers.filter(user => {
+          if (user.syncedFromLocal === true) {
+            console.log(`   [SKIP] Utilisateur ignoré (syncedFromLocal): ${user.email}`);
+            return false;
+          }
+          return true;
+        });
+        
+        console.log(`[INFO] ${usersToImport.length} utilisateurs à importer (après filtrage sur ${firebaseUsers.length})`);
+        formattedUsers = usersToImport.map(u => ({
+          uid: u.uid || u.id,
+          email: u.email,
+          displayName: u.displayName || u.display_name,
+          role: u.role || 'user',
+          createdAt: u.createdAt
+        }));
+      } else if (usersError) {
+        console.warn('[WARN] Erreur récupération utilisateurs:', usersError);
+      }
+    } catch (err) {
+      console.warn('[WARN] Erreur utilisateurs Firebase:', err.message);
+    }
+
+    console.log(`   - ${formattedUsers.length} utilisateurs`);
+
+    // 4. Envoyer à l'API locale
     const response = await fetch(`${API_URL}/sync/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         reports: formattedReports, 
-        users: [],  // Pas de sync users depuis Firebase
+        users: formattedUsers,
         entreprises: formattedEntreprises
       })
     });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('❌ Erreur API:', response.status, errorText);
+      console.error('[ERROR] Erreur API:', response.status, errorText);
       return { success: false, error: `Erreur API: ${response.status}` };
     }
 
     const result = await response.json();
     
-    console.log('✅ === SYNCHRONISATION TERMINÉE ===');
-    console.log(`   ✓ ${result.imported?.reports || 0} signalements importés`);
-    console.log(`   ✓ ${result.imported?.entreprises || 0} entreprises importées`);
+    console.log('[OK] === SYNCHRONISATION TERMINÉE ===');
+    console.log(`   [OK] ${result.imported?.users || 0} utilisateurs importés`);
+    console.log(`   [OK] ${result.imported?.reports || 0} signalements importés`);
+    console.log(`   [OK] ${result.imported?.entreprises || 0} entreprises importées`);
     
     // Afficher les erreurs s'il y en a
     if (result.errors && result.errors.length > 0) {
-      console.warn('⚠️ Erreurs durant l\'import:');
+      console.warn('[WARN] Erreurs durant l\'import:');
       result.errors.forEach(err => {
         console.warn(`   - ${err.type} ${err.id}: ${err.error}`);
       });
@@ -513,13 +663,14 @@ export const syncFromFirebase = async () => {
     return { 
       success: true, 
       imported: {
+        users: result.imported?.users || 0,
         reports: result.imported?.reports || 0,
         entreprises: result.imported?.entreprises || 0
       },
       errors: result.errors
     };
   } catch (error) {
-    console.error('❌ Exception syncFromFirebase:', error);
+    console.error('[ERROR] Exception syncFromFirebase:', error);
     return { success: false, error: error.message };
   }
 };
@@ -538,14 +689,14 @@ export const fullSync = async (onProgress = null) => {
   try {
     if (onProgress) onProgress(10);
 
-    // 1. Push local → Firebase
+    // 1. Push local to Firebase
     const pushResult = await syncToFirebase();
     results.pushed = pushResult.synced || 0;
     if (pushResult.errors) results.errors.push(...pushResult.errors);
 
     if (onProgress) onProgress(50);
 
-    // 2. Pull Firebase → local
+    // 2. Pull Firebase to local
     const pullResult = await syncFromFirebase();
     results.pulled = pullResult.imported || 0;
 
@@ -557,6 +708,45 @@ export const fullSync = async (onProgress = null) => {
     results.success = false;
     results.error = error.message;
     return results;
+  }
+};
+
+/**
+ * Récupère tous les utilisateurs locaux
+ */
+export const getAllLocalUsers = async () => {
+  try {
+    const response = await fetch(`${API_URL}/users`);
+    if (!response.ok) throw new Error('Erreur API locale');
+    const data = await response.json();
+    
+    // Formater les utilisateurs pour correspondre au format attendu
+    const users = (data.users || []).map(u => ({
+      uid: u.id,
+      email: u.email,
+      displayName: u.display_name,
+      role: u.role,
+      createdAt: u.created_at,
+      isSynced: u.is_synced
+    }));
+    
+    return { users, error: null };
+  } catch (error) {
+    console.error('Erreur getAllLocalUsers:', error);
+    return { users: [], error: error.message };
+  }
+};
+
+/**
+ * Récupère le nombre d'utilisateurs en attente de sync
+ */
+export const getPendingUsersCount = async () => {
+  try {
+    const response = await fetch(`${API_URL}/sync/pending`);
+    const data = await response.json();
+    return data.users?.length || 0;
+  } catch {
+    return 0;
   }
 };
 
@@ -572,5 +762,7 @@ export default {
   getPendingSyncCount,
   syncToFirebase,
   syncFromFirebase,
-  fullSync
+  fullSync,
+  getAllLocalUsers,
+  getPendingUsersCount
 };

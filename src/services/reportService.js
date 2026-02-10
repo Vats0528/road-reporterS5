@@ -165,7 +165,7 @@ export const createReportDirect = async (reportData) => {
     };
 
     const docRef = await addDoc(collection(db, REPORTS_COLLECTION), data);
-    console.log(`✅ Signalement créé dans Firebase: ${docRef.id}`);
+    console.log(`[OK] Signalement créé dans Firebase: ${docRef.id}`);
     
     return { id: docRef.id, error: null };
   } catch (error) {
