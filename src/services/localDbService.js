@@ -407,7 +407,8 @@ export const syncToFirebase = async () => {
             entrepriseId: report.entreprise_id || null
           };
           
-          const result = await updateFirebaseReport(firebaseId, updateData, 'manager');
+          // Passer isSync=true pour contourner la vérification d'utilisateur
+          const result = await updateFirebaseReport(firebaseId, updateData, 'sync', true);
           
           if (result.success) {
             await fetch(`${API_URL}/sync/mark-synced`, {
@@ -506,6 +507,28 @@ export const syncFromFirebase = async () => {
   try {
     console.log('[SYNC] === DÉBUT SYNCHRONISATION FIREBASE to LOCAL ===');
     
+    // D'abord, récupérer les IDs locaux existants (signalements)
+    const localReportsResult = await getAllReports();
+    const localReportIds = new Set((localReportsResult.reports || []).map(r => r.id));
+    const localFirebaseIds = new Set((localReportsResult.reports || []).filter(r => r.firebase_id).map(r => r.firebase_id));
+    console.log(`[INFO] ${localReportIds.size} signalements déjà en local`);
+    
+    // Récupérer aussi les utilisateurs locaux
+    let localUserIds = new Set();
+    let localUserEmails = new Set();
+    try {
+      const usersResponse = await fetch(`${API_URL}/users`);
+      if (usersResponse.ok) {
+        const usersData = await usersResponse.json();
+        const usersList = usersData.users || usersData || [];
+        localUserIds = new Set(usersList.map(u => u.id));
+        localUserEmails = new Set(usersList.map(u => u.email?.toLowerCase()));
+        console.log(`[INFO] ${localUserIds.size} utilisateurs déjà en local`);
+      }
+    } catch (err) {
+      console.warn('[WARN] Impossible de récupérer les utilisateurs locaux:', err.message);
+    }
+    
     // 1. Récupérer les SIGNALEMENTS de Firebase
     console.log('[INFO] Récupération des signalements Firebase...');
     const { reports: firebaseReports, error: reportsError } = await getFirebaseReports();
@@ -517,19 +540,29 @@ export const syncFromFirebase = async () => {
     
     console.log(`[INFO] ${firebaseReports?.length || 0} signalements trouvés dans Firebase`);
 
-    // FILTRER les signalements qui ont été synchronisés depuis le local
-    // pour éviter les doublons
+    // FILTRER les signalements qui existent déjà en local
     const reportsToImport = (firebaseReports || []).filter(report => {
-      // Ignorer les signalements qui ont été créés depuis le local
-      if (report.syncedFromLocal === true) {
-        console.log(`   [SKIP] Ignoré (syncedFromLocal): ${report.id}`);
+      const firebaseId = report.id;
+      
+      // Ignorer si on a déjà ce signalement en local (par firebase_id)
+      if (localFirebaseIds.has(firebaseId)) {
+        console.log(`   [SKIP] Déjà en local (firebase_id): ${firebaseId}`);
         return false;
       }
-      // Ignorer si le localId existe (c'est un signalement qu'on a envoyé)
-      if (report.localId) {
-        console.log(`   [SKIP] Ignoré (a localId): ${report.id} to ${report.localId}`);
+      
+      // Ignorer si le localId existe déjà en base locale
+      if (report.localId && localReportIds.has(report.localId)) {
+        console.log(`   [SKIP] Déjà en local (localId): ${firebaseId} -> ${report.localId}`);
         return false;
       }
+      
+      // Vérifier aussi si l'ID Firebase est utilisé directement comme ID local
+      if (localReportIds.has(firebaseId)) {
+        console.log(`   [SKIP] Déjà en local (id direct): ${firebaseId}`);
+        return false;
+      }
+      
+      console.log(`   [NEW] À importer: ${firebaseId} (${report.type})`);
       return true;
     });
 
@@ -563,7 +596,6 @@ export const syncFromFirebase = async () => {
         statusHistory: Array.isArray(report.statusHistory) ? report.statusHistory : 
                        Array.isArray(report.status_history) ? report.status_history : [],
         createdAt: createdAt,
-        syncedFromLocal: report.syncedFromLocal || false,
         localId: report.localId || null
       };
     });
@@ -602,12 +634,22 @@ export const syncFromFirebase = async () => {
     try {
       const { users: firebaseUsers, error: usersError } = await getAllFirebaseUsers();
       if (!usersError && firebaseUsers) {
-        // Filtrer les utilisateurs déjà synchronisés depuis le local
+        // Filtrer les utilisateurs qui existent DÉJÀ en local (par ID ou email)
         const usersToImport = firebaseUsers.filter(user => {
-          if (user.syncedFromLocal === true) {
-            console.log(`   [SKIP] Utilisateur ignoré (syncedFromLocal): ${user.email}`);
+          const userId = user.uid || user.id;
+          const userEmail = user.email?.toLowerCase();
+          
+          // Ignorer si l'utilisateur existe déjà en local
+          if (localUserIds.has(userId)) {
+            console.log(`   [SKIP] Utilisateur déjà en local (id): ${user.email}`);
             return false;
           }
+          if (userEmail && localUserEmails.has(userEmail)) {
+            console.log(`   [SKIP] Utilisateur déjà en local (email): ${user.email}`);
+            return false;
+          }
+          
+          console.log(`   [NEW] Utilisateur à importer: ${user.email}`);
           return true;
         });
         

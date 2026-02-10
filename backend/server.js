@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
@@ -7,17 +8,31 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 
-// Firebase Admin SDK pour l'upload vers Firebase Storage
-const admin = require('firebase-admin');
-const serviceAccount = require('./firebase-admin-key.json');
+// Firebase Admin SDK pour l'upload vers Firebase Storage (optionnel)
+let admin = null;
+let bucket = null;
+let firebaseAdminEnabled = false;
 
-// Initialiser Firebase Admin
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
-  storageBucket: 'routes-antananarivo.firebasestorage.app'
-});
-
-const bucket = admin.storage().bucket();
+try {
+  admin = require('firebase-admin');
+  const serviceAccountPath = path.join(__dirname, 'firebase-admin-key.json');
+  
+  if (fs.existsSync(serviceAccountPath)) {
+    const serviceAccount = require('./firebase-admin-key.json');
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount),
+      storageBucket: 'routes-antananarivo.appspot.com'
+    });
+    bucket = admin.storage().bucket();
+    firebaseAdminEnabled = true;
+    console.log('[OK] Firebase Admin SDK initialisé');
+    console.log('[OK] Storage Bucket:', bucket.name);
+  } else {
+    console.log('[WARN] firebase-admin-key.json non trouvé - Firebase Storage désactivé');
+  }
+} catch (err) {
+  console.log('[WARN] Firebase Admin non disponible:', err.message);
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -91,12 +106,13 @@ const generateToken = () => {
   return crypto.randomBytes(32).toString('hex');
 };
 
-// Connexion PostgreSQL local via socket Unix (authentification peer)
+// Connexion PostgreSQL - supporte Docker ou local
 const pool = new Pool({
-  host: '/var/run/postgresql',  // Socket Unix pour auth peer
+  host: process.env.PGHOST || 'localhost',
+  port: process.env.PGPORT || 5432,
   database: process.env.PGDATABASE || 'road_reporter',
-  user: process.env.PGUSER || 'vats'
-  // Pas de mot de passe nécessaire avec l'auth peer
+  user: process.env.PGUSER || 'road_user',
+  password: process.env.PGPASSWORD || 'road_password'
 });
 
 // Test connexion
@@ -837,18 +853,32 @@ app.post('/api/sync/import', async (req, res) => {
           );
           skippedReports++;
           console.log('[SYNC-IMPORT] Signalement lie: ' + report.localId + ' -> ' + report.id);
-        } else if (!report.syncedFromLocal) {
-          // Nouveau signalement venant de Firebase (pas cree localement)
+        } else {
+          // Nouveau signalement - IMPORTER (on ne vérifie plus syncedFromLocal)
+          // L'ID Firebase devient l'ID local pour éviter les doublons futurs
+          const newLocalId = report.localId || require('crypto').randomUUID();
+          
+          // Vérifier si le user_id existe en local, sinon mettre NULL
+          let validUserId = null;
+          if (report.userId) {
+            const userExists = await pool.query('SELECT id FROM users WHERE id = $1', [report.userId]);
+            if (userExists.rows.length > 0) {
+              validUserId = report.userId;
+            } else {
+              console.log('[SYNC-IMPORT] user_id ' + report.userId + ' non trouvé, utilisation de NULL');
+            }
+          }
+          
           await pool.query(
             `INSERT INTO road_reports 
              (id, user_id, user_email, type, description, latitude, longitude,
               quartier, arrondissement, status, images, status_history,
               created_at, is_synced, synced_at, firebase_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, TRUE, NOW(), $1)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, TRUE, NOW(), $14)
              ON CONFLICT (id) DO NOTHING`,
             [
-              report.id, 
-              report.userId, 
+              newLocalId, 
+              validUserId,  // Utiliser NULL si l'utilisateur n'existe pas
               report.userEmail, 
               report.type, 
               report.description, 
@@ -859,14 +889,12 @@ app.post('/api/sync/import', async (req, res) => {
               report.status,
               JSON.stringify(report.images || []), 
               JSON.stringify(report.statusHistory || []),
-              createdAt
+              createdAt,
+              report.id  // firebase_id
             ]
           );
           importedReports++;
-          console.log('[SYNC-IMPORT] Signalement importe: ' + report.id + ' (' + report.type + ')');
-        } else {
-          skippedReports++;
-          console.log('[SYNC-IMPORT] Signalement ignore (syncedFromLocal): ' + report.id);
+          console.log('[SYNC-IMPORT] Signalement importe: ' + report.id + ' -> local:' + newLocalId + ' (' + report.type + ')');
         }
       } catch (err) {
         console.error('[SYNC-IMPORT] Erreur import report ' + report.id + ':', err.message);

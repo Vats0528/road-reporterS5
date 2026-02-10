@@ -1,0 +1,550 @@
+{
+	"info": {
+		"_postman_id": "road-reporter-api-collection",
+		"name": "Road Reporter API",
+		"description": "Collection Postman pour tester l'API Road Reporter",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:3001",
+			"type": "string"
+		}
+	],
+	"item": [
+		{
+			"name": "Health",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/health",
+							"host": ["{{baseUrl}}"],
+							"path": ["health"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Authentification",
+			"item": [
+				{
+					"name": "Login",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"manager@routestana.mg\",\n    \"password\": \"password123\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/login",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "auth", "login"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Register",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"email\": \"user@example.com\",\n    \"password\": \"password123\",\n    \"displayName\": \"Test User\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/auth/register",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "auth", "register"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Signalements",
+			"item": [
+				{
+					"name": "Liste des signalements",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/reports",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "reports"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Détail d'un signalement",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/reports/:id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "reports", ":id"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "report-id-here"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Créer un signalement",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"type\": \"nid-de-poule\",\n    \"description\": \"Grand trou sur la route principale\",\n    \"latitude\": -18.8792,\n    \"longitude\": 47.5079,\n    \"quartier\": \"analakely\",\n    \"arrondissement\": \"arr1\",\n    \"user_email\": \"user@example.com\",\n    \"surface\": 25,\n    \"niveau\": 5\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/reports",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "reports"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Modifier un signalement",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"description\": \"Description mise à jour\",\n    \"surface\": 30,\n    \"niveau\": 7\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/reports/:id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "reports", ":id"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "report-id-here"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Modifier avec calcul budget",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"niveau\": 5,\n    \"surface\": 100,\n    \"status\": \"en-cours\",\n    \"entreprise_id\": \"ent1\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/reports/:id/with-budget",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "reports", ":id", "with-budget"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "report-id-here"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Changer le statut",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"status\": \"en-cours\",\n    \"changedBy\": \"manager@routestana.mg\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/reports/:id/status",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "reports", ":id", "status"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "report-id-here"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Supprimer un signalement",
+					"request": {
+						"method": "DELETE",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/reports/:id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "reports", ":id"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "report-id-here"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Utilisateurs",
+			"item": [
+				{
+					"name": "Liste des utilisateurs",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/users",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "users"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Détail utilisateur",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/users/:id",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "users", ":id"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "user-id-here"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Modifier rôle utilisateur",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"role\": \"manager\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/users/:id/role",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "users", ":id", "role"],
+							"variable": [
+								{
+									"key": "id",
+									"value": "user-id-here"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Entreprises",
+			"item": [
+				{
+					"name": "Liste des entreprises",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/entreprises",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "entreprises"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Créer une entreprise",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"name\": \"Nouvelle Entreprise BTP\",\n    \"contact\": \"Jean Dupont\",\n    \"phone\": \"+261 34 00 000 00\",\n    \"email\": \"contact@entreprise.mg\",\n    \"address\": \"Antananarivo, Madagascar\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/entreprises",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "entreprises"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Paramètres",
+			"item": [
+				{
+					"name": "Liste des paramètres",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/settings",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "settings"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Détail d'un paramètre",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/settings/prix_m2",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "settings", "prix_m2"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Modifier le prix par m²",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"value\": {\n        \"amount\": 60000,\n        \"currency\": \"MGA\"\n    },\n    \"description\": \"Prix forfaitaire par m² pour le calcul du budget\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/settings/prix_m2",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "settings", "prix_m2"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Statistiques",
+			"item": [
+				{
+					"name": "Statistiques des délais",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/stats/delays",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "stats", "delays"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Calculer le budget",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/calculate-budget?niveau=5&surface=100",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "calculate-budget"],
+							"query": [
+								{
+									"key": "niveau",
+									"value": "5"
+								},
+								{
+									"key": "surface",
+									"value": "100"
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Synchronisation",
+			"item": [
+				{
+					"name": "Importer depuis Firebase",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"reports\": [],\n    \"users\": [],\n    \"entreprises\": []\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/sync/import",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "sync", "import"]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Marquer comme synchronisé",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"table\": \"road_reports\",\n    \"ids\": [\"report-id-1\", \"report-id-2\"]\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/sync/mark-synced",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "sync", "mark-synced"]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "Upload Images",
+			"item": [
+				{
+					"name": "Upload image pour signalement",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "images",
+									"type": "file",
+									"src": []
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/upload/:reportId",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "upload", ":reportId"],
+							"variable": [
+								{
+									"key": "reportId",
+									"value": "report-id-here"
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "Migrer image vers Firebase",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"localUrl\": \"http://localhost:3001/uploads/report-id/image.png\",\n    \"reportId\": \"report-id-here\"\n}"
+						},
+						"url": {
+							"raw": "{{baseUrl}}/api/migrate-image-to-firebase",
+							"host": ["{{baseUrl}}"],
+							"path": ["api", "migrate-image-to-firebase"]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}

@@ -9,7 +9,8 @@ import {
   where,
   orderBy,
   serverTimestamp,
-  getDoc
+  getDoc,
+  setDoc
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
 
@@ -59,7 +60,10 @@ const canCreateReport = () => {
  * @param {Object} report - Le signalement à modifier
  * @param {string} userRole - Le rôle de l'utilisateur
  */
-const canModifyReport = (report, userRole) => {
+const canModifyReport = (report, userRole, isSync = false) => {
+  // Autoriser la synchronisation sans vérification d'utilisateur
+  if (isSync || userRole === 'sync') return true;
+  
   if (!auth.currentUser || !report) return false;
   
   // Les managers peuvent tout modifier
@@ -293,7 +297,7 @@ export const getUserReports = async (userId) => {
  * Mettre à jour un signalement
  * Requiert: Manager OU propriétaire du signalement (si status = nouveau)
  */
-export const updateReport = async (reportId, updateData, userRole = 'user') => {
+export const updateReport = async (reportId, updateData, userRole = 'user', isSync = false) => {
   try {
     // S'assurer que reportId est une chaîne
     const id = String(reportId || '');
@@ -306,13 +310,22 @@ export const updateReport = async (reportId, updateData, userRole = 'user') => {
     const reportDoc = await getDoc(reportRef);
     
     if (!reportDoc.exists()) {
+      // Pour la sync, créer le document s'il n'existe pas
+      if (isSync || userRole === 'sync') {
+        console.log(`[SYNC] Document ${id} n'existe pas, création...`);
+        await setDoc(reportRef, {
+          ...updateData,
+          updatedAt: serverTimestamp()
+        });
+        return { success: true, error: null };
+      }
       return { success: false, error: 'Signalement non trouvé' };
     }
     
     const currentReport = reportDoc.data();
     
     // Vérification de permission
-    if (!canModifyReport(currentReport, userRole)) {
+    if (!canModifyReport(currentReport, userRole, isSync)) {
       return { 
         success: false, 
         error: 'Vous n\'avez pas la permission de modifier ce signalement' 

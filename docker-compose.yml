@@ -1,21 +1,72 @@
 version: '3.8'
 
 services:
-  # Serveur de tuiles avec nginx (tuiles raster)
-  tile-server:
+  # Conteneur combiné: PostgreSQL + Serveur de tuiles Nginx
+  road-reporter-db:
+    image: postgres:15-alpine
+    container_name: road-reporter-db
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: road_reporter
+      POSTGRES_USER: road_user
+      POSTGRES_PASSWORD: road_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U road_user -d road_reporter"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Serveur de tuiles (partagé dans le même réseau)
+  tiles:
     image: nginx:alpine
     container_name: road-reporter-tiles
     ports:
       - "8080:80"
     volumes:
       - ./tiles:/usr/share/nginx/html/tiles:ro
-      - ./nginx-tiles.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx-tiles.conf:/etc/nginx/http.d/default.conf:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
+
+  # Backend API Node.js
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: road-reporter-api
+    ports:
+      - "3001:3001"
+    environment:
+      PGHOST: road-reporter-db
+      PGPORT: 5432
+      PGDATABASE: road_reporter
+      PGUSER: road_user
+      PGPASSWORD: road_password
+      NODE_ENV: production
+    volumes:
+      - ./backend/uploads:/app/uploads
+      - ./backend/firebase-admin-key.json:/app/firebase-admin-key.json:ro
+    depends_on:
+      road-reporter-db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
 
 networks:
   default:
