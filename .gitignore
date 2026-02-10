@@ -40,3 +40,7 @@ ui-debug.log
 # Build files
 build/
 .cache/
+# Firebase Admin credentials (NEVER commit)
+backend/firebase-admin-key.json
+**/firebase-admin*.json
+*.pem
